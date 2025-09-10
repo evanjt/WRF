@@ -1,0 +1,32 @@
+# Registry for SNOWPACK Land Surface Model
+# Clean interface without blowing snow complexity
+# Based on essential meteorological and snow physics variables only
+
+# Core SNOWPACK surface fluxes - replaces complex CRYOWRF outputs
+state    real   SNOWPACK_TSK      ij     misc        1         -     "SNOWPACK_TSK"      "SNOWPACK SURFACE TEMPERATURE"             "K"
+state    real   SNOWPACK_HFX      ij     misc        1         -     "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"  
+state    real   SNOWPACK_QFX      ij     misc        1         -     "SNOWPACK_QFX"      "SNOWPACK LATENT HEAT FLUX"                "kg m-2 s-1"
+state    real   SNOWPACK_LH       ij     misc        1         -     "SNOWPACK_LH"       "SNOWPACK LATENT HEAT FLUX"                "W m-2"
+state    real   SNOWPACK_ALBEDO   ij     misc        1         -     "SNOWPACK_ALBEDO"   "SNOWPACK SURFACE ALBEDO"                  "1"
+state    real   SNOWPACK_SNOWC    ij     misc        1         -     "SNOWPACK_SNOWC"    "SNOWPACK SNOW COVERAGE FRACTION"          "1"
+state    real   SNOWPACK_SNOW     ij     misc        1         -     "SNOWPACK_SNOW"     "SNOWPACK SNOW WATER EQUIVALENT"           "mm"
+state    real   SNOWPACK_SNOWH    ij     misc        1         -     "SNOWPACK_SNOWH"    "SNOWPACK SNOW DEPTH"                      "m"
+state    real   SNOWPACK_EMISS    ij     misc        1         -     "SNOWPACK_EMISS"    "SNOWPACK SURFACE EMISSIVITY"              "1"
+
+# Essential diagnostic variables
+state    real   SNOWPACK_ACSNOM   ij     misc        1         -     "SNOWPACK_ACSNOM"   "ACCUMULATED SNOW MELT"                    "mm"
+state    real   SNOWPACK_ACSNOW   ij     misc        1         -     "SNOWPACK_ACSNOW"   "ACCUMULATED SNOWFALL"                     "mm"
+
+# Time series output variables for essential SNOWPACK diagnostics  
+state    real   SNOWPACK_TSK_TS   ijkft   misc        1         -     "SNOWPACK_TSK_TS"   "SNOWPACK SURFACE TEMP TIMESERIES"         "K"
+state    real   SNOWPACK_HFX_TS   ijkft   misc        1         -     "SNOWPACK_HFX_TS"   "SNOWPACK SENSIBLE FLUX TIMESERIES"        "W m-2"
+state    real   SNOWPACK_QFX_TS   ijkft   misc        1         -     "SNOWPACK_QFX_TS"   "SNOWPACK LATENT FLUX TIMESERIES"          "kg m-2 s-1"
+state    real   SNOWPACK_ALBEDO_TS ijkft  misc        1         -     "SNOWPACK_ALBEDO_TS" "SNOWPACK ALBEDO TIMESERIES"               "1"
+state    real   SNOWPACK_SNOW_TS  ijkft   misc        1         -     "SNOWPACK_SNOW_TS"  "SNOWPACK SWE TIMESERIES"                  "mm"
+state    real   SNOWPACK_SNOWH_TS ijkft   misc        1         -     "SNOWPACK_SNOWH_TS" "SNOWPACK DEPTH TIMESERIES"                "m"
+
+# Namelist parameters for SNOWPACK configuration
+rconfig   integer sf_snowpack_physics    namelist,physics   1            0       -      "sf_snowpack_physics"    "SNOWPACK LAND SURFACE OPTION"
+
+# Package declaration
+package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow
