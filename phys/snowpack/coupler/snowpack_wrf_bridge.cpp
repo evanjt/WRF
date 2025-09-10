@@ -6,6 +6,7 @@
  */
 
 #include <cmath>
+#include <cstdio>
 
 // C interface for Fortran binding
 extern "C" {
@@ -23,6 +24,19 @@ void snowpack_physics(
     double* albedo, double* snow_coverage,
     double dt, int i_grid, int j_grid)
 {
+    // Diagnostic output to prove SNOWPACK physics is being called
+    static int call_count = 0;
+    static int last_i = -1, last_j = -1;
+    
+    call_count++;
+    
+    // Print diagnostic info for first few calls and when grid point changes
+    if (call_count <= 5 || (i_grid != last_i || j_grid != last_j)) {
+        printf("SNOWPACK-PHYSICS: Call #%d at grid(%d,%d) T=%.2fK RH=%.3f SWE=%.2fmm Precip=%.4fmm/s\n", 
+               call_count, i_grid, j_grid, temp_air, humidity, *snow_swe, precipitation);
+        last_i = i_grid;
+        last_j = j_grid;
+    }
     // Constants for simple snow physics
     const double T_FREEZE = 273.15;        // Freezing point [K]
     const double SNOW_DENSITY = 100.0;     // Fresh snow density [kg/m³]

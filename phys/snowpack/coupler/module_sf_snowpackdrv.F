@@ -87,6 +87,11 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 !  Call SNOWPACK physics - this replaces the entire CRYOWRF coupling system
 !-------------------------------------------------------------------
 
+    ! Diagnostic message to confirm SNOWPACK LSM is active
+    IF (itimestep == 1) THEN
+        CALL wrf_message('*** SNOWPACK LSM ACTIVATED: Running modern SNOWPACK physics ***')
+    END IF
+
     CALL snowpack_driver( &
         itimestep, dt, &
         t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &   ! Atmospheric state
