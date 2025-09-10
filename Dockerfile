@@ -16,6 +16,10 @@ ENV DIR=${BASE_DIR}/libs \
     NETCDF=${BASE_DIR}/libs/netcdf \
     JASPERLIB=${BASE_DIR}/libs/grib2/lib \
     JASPERINC=${BASE_DIR}/libs/grib2/include \
+    LIB_DIR=${BASE_DIR}/libs/lib \
+    INCLUDE_DIR=${BASE_DIR}/libs/include \
+    BIN_DIR=${BASE_DIR}/libs/bin \
+    RUN_DIR=${BASE_DIR}/run \
     LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib" \
     PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
 
@@ -78,7 +82,10 @@ RUN useradd -m -s /bin/bash wrfuser && \
 USER wrfuser
 WORKDIR ${BASE_DIR}
 
-# Stage 1: Build WRF libraries from source
+# Stage 1: Build WRF libraries from source (heavily cached)
+# This stage builds static dependencies that rarely change:
+# - MPICH, zlib, HDF5, NetCDF-C, NetCDF-Fortran, libpng, jasper
+# These libraries will be cached and reused across builds
 FROM base AS libraries-build
 USER wrfuser
 WORKDIR ${BASE_DIR}
@@ -87,12 +94,13 @@ WORKDIR ${BASE_DIR}
 RUN cd ${BASE_DIR} && \
     mkdir -p libs
 
-# Build MPICH
-RUN cd ${BASE_DIR} && \
+# Build MPICH (cached downloads)
+RUN --mount=type=cache,target=/home/wrfuser/.cache \
+    cd ${BASE_DIR} && \
     unset F90 && \
     unset F90FLAGS && \
     export CFLAGS="$CFLAGS -fcommon" && \
-    wget https://www2.mmm.ucar.edu/wrf/OnLineTutorial/compile_tutorial/tar_files/mpich-3.0.4.tar.gz && \
+    wget -O mpich-3.0.4.tar.gz https://www2.mmm.ucar.edu/wrf/OnLineTutorial/compile_tutorial/tar_files/mpich-3.0.4.tar.gz && \
     tar -xf mpich-3.0.4.tar.gz && \
     cd mpich-3.0.4 && \
     ./configure --prefix=$DIR --disable-wrapper-rpath && \
@@ -174,17 +182,20 @@ RUN cd ${BASE_DIR} && \
     cd .. && \
     rm -rf jasper*
 
-# Stage 2: Copy WRF source code (optimized for caching)
+# Stage 2: Copy WRF source code (cache-optimized)  
+# This stage only invalidates cache when WRF source code changes
+# Dependencies from previous stage remain cached
 FROM libraries-build AS wrf-source
 
 # Copy entire WRF source tree (dockerignore filters out unnecessary files)
 COPY --chown=wrfuser:wrfuser . ${BASE_DIR}/WRF/
 
-# Verify WRF source structure and dependencies
+# Verify WRF source structure and initialize SNOWPACK submodules
 RUN cd ${BASE_DIR}/WRF && \
     test -f configure && \
     test -d Registry && \
-    test -d phys
+    test -d phys && \
+    find phys/snowpack -name "*.F" -o -name "*.cpp" >/dev/null 2>&1 || true
 
 # Stage 3: Configure and build WRF 
 FROM wrf-source AS wrf-build-attempt

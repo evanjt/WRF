@@ -10,10 +10,13 @@ on:
     branches:
       - '**'
   workflow_dispatch:
+  schedule:
+    # Rebuild library cache weekly (Sundays at 02:00 UTC) to ensure fresh dependencies
+    - cron: '0 2 * * 0'
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/wrf
 
 jobs:
   build:
@@ -62,17 +65,38 @@ jobs:
           type=semver,pattern={{major}}
           type=raw,value=latest,enable={{is_default_branch}}
 
+    - name: Build libraries stage (pre-cache heavy dependencies)
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        target: libraries-build
+        platforms: linux/amd64
+        push: false
+        cache-from: type=gha,scope=libraries
+        cache-to: type=gha,mode=max,scope=libraries
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+      # Force library rebuild on schedule or when Dockerfile changes
+      env:
+        FORCE_REBUILD: ${{ github.event_name == 'schedule' || contains(github.event.head_commit.message, '[rebuild-libs]') }}
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
       with:
         context: .
         file: ./Dockerfile
         platforms: linux/amd64
-        push: ${{ github.event_name != 'pull_request' }}
+        push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        cache-from: |
+          type=gha,scope=libraries
+          type=gha,scope=wrf-source
+          type=gha,scope=wrf-build
+        cache-to: |
+          type=gha,mode=max,scope=wrf-source
+          type=gha,mode=max,scope=wrf-build
         build-args: |
           BUILDKIT_INLINE_CACHE=1
 
