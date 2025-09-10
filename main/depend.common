@@ -1190,6 +1190,16 @@ module_sf_ruclsm.o: \
 	module_data_gocart_dust.o 
 
 
+module_sf_snowpackdrv.o: \
+	module_sf_snowpack.o \
+	../share/module_model_constants.o \
+	../frame/module_wrf_error.o 
+
+
+module_sf_snowpack.o: \
+	../share/module_model_constants.o 
+
+
 module_sf_pxlsm.o: \
 	../share/module_model_constants.o \
 	module_sf_pxlsm_data.o 
@@ -1298,6 +1308,7 @@ module_physics_init.o: \
 	module_sf_bep.o \
 	module_sf_bep_bem.o \
 	module_sf_ruclsm.o \
+	module_sf_snowpackdrv.o \
 	module_sf_pxlsm.o \
 	module_sf_lake.o \
 	module_bl_ysu.o \

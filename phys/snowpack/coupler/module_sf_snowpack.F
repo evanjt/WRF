@@ -1,8 +1,7 @@
 !WRF:MODEL_LAYER:PHYSICS
 !
-! ** SNOWPACK Interface for WRF **  
-! Modern Fortran 2003 ISO_C_BINDING approach
-! Direct interface to SNOWPACK v11.08 - clean coupling without blowing snow
+! SNOWPACK Interface Module
+! Provides ISO_C_BINDING interface between WRF and SNOWPACK physics
 !
       MODULE module_sf_snowpack
 
@@ -50,8 +49,8 @@
 
       SUBROUTINE snowpack_driver( &
         itimestep, dt, &
-        t3d, qv3d, u_phy, v_phy, p3d, dz8w, &
-        swdown, glw, precip_in, &
+        t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &
+        swdown, glw, rainbl, &
         tsk, hfx, qfx, lh, albedo, snowc, &
         snow, snowh, qsfc, &
         ids,ide, jds,jde, kds,kde, &
@@ -62,16 +61,16 @@
         INTEGER, INTENT(IN) :: itimestep
         REAL,    INTENT(IN) :: dt
 
-        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: t3d
-        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: qv3d
+        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: t_phy
+        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: qv_curr
         REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: u_phy
         REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: v_phy
-        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: p3d
+        REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: p8w
         REAL, DIMENSION(ims:ime, kms:kme, jms:jme), INTENT(IN) :: dz8w
 
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: swdown
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: glw
-        REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: precip_in
+        REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: rainbl
 
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: tsk
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: hfx
@@ -93,9 +92,8 @@
         REAL :: wind_speed, wind_dir, rh, precip_rate
         REAL :: heat_sens, heat_lat, alb_out, snow_cov
         REAL :: es, qs
-        REAL(C_DOUBLE) :: dt_c, t_ml_c, rh_c, ws_c, wd_c
-        REAL(C_DOUBLE) :: sw_c, lw_c, pr_c, pm_c, zm_c
-        REAL(C_DOUBLE) :: snow_c, snowh_c, tsk_c
+        REAL(C_DOUBLE) :: snow_swe_c, snow_depth_c, surface_temp_c
+        REAL(C_DOUBLE) :: heat_sens_c, heat_lat_c, albedo_c, snow_cov_c
         
         REAL, PARAMETER :: svp1 = 0.6112, svp2 = 17.67
         REAL, PARAMETER :: svp3 = 29.65, svpt0 = 273.15, ep_2 = 0.622
@@ -108,12 +106,12 @@
     JLOOP: DO j = jts, jte
 
       ! Extract atmospheric conditions at lowest model level
-      z_ml  = 0.5 * dz8w(i,1,j)                    ! Height of first model level [m]
-      t_ml  = t3d(i,1,j)                           ! Temperature [K]
-      q_ml  = qv3d(i,1,j) / (1.0 + qv3d(i,1,j))   ! Specific humidity [kg/kg]
-      p_ml  = p3d(i,1,j)                           ! Pressure [Pa]  
-      u_ml  = u_phy(i,1,j)                         ! U wind [m/s]
-      v_ml  = v_phy(i,1,j)                         ! V wind [m/s]
+      z_ml  = 0.5 * dz8w(i,1,j)                      ! Height of first model level [m]
+      t_ml  = t_phy(i,1,j)                           ! Temperature [K]
+      q_ml  = qv_curr(i,1,j) / (1.0 + qv_curr(i,1,j)) ! Specific humidity [kg/kg]
+      p_ml  = p8w(i,1,j)                             ! Pressure [Pa]  
+      u_ml  = u_phy(i,1,j)                           ! U wind [m/s]
+      v_ml  = v_phy(i,1,j)                           ! V wind [m/s]
 
       ! Calculate wind speed and direction
       wind_speed = SQRT(u_ml*u_ml + v_ml*v_ml)     ! Wind speed [m/s]
@@ -125,26 +123,32 @@
       rh = MIN(1.0, MAX(0.0, q_ml / qs))                      ! Relative humidity [0-1]
 
       ! Convert precipitation from [mm/dt] to [mm/s]  
-      precip_rate = precip_in(i,j) / dt
+      precip_rate = rainbl(i,j) / dt
 
-      ! Call SNOWPACK physics through C++ interface
+      ! Convert to C_DOUBLE for interface
+      snow_swe_c = REAL(snow(i,j), C_DOUBLE)
+      snow_depth_c = REAL(snowh(i,j), C_DOUBLE)
+      surface_temp_c = REAL(tsk(i,j), C_DOUBLE)
+
+      ! Call SNOWPACK physics through C interface
       CALL snowpack_physics_c( &
         REAL(t_ml, C_DOUBLE), REAL(rh, C_DOUBLE), &
         REAL(wind_speed, C_DOUBLE), REAL(wind_dir, C_DOUBLE), &
         REAL(swdown(i,j), C_DOUBLE), REAL(glw(i,j), C_DOUBLE), &
         REAL(precip_rate, C_DOUBLE), REAL(p_ml, C_DOUBLE), REAL(z_ml, C_DOUBLE), &
-        snow(i,j), snowh(i,j), tsk(i,j), &
-        heat_sens, heat_lat, alb_out, snow_cov, &
+        snow_swe_c, snow_depth_c, surface_temp_c, &
+        heat_sens_c, heat_lat_c, albedo_c, snow_cov_c, &
         REAL(dt, C_DOUBLE), INT(i, C_INT), INT(j, C_INT))
 
       ! Update WRF variables with SNOWPACK results
-      hfx(i,j)    = heat_sens                       ! Sensible heat flux [W/m2]  
-      lh(i,j)     = heat_lat                        ! Latent heat flux [W/m2]
-      qfx(i,j)    = heat_lat / 2.5e6               ! Moisture flux [kg/m2/s] (approx)
-      albedo(i,j) = alb_out                         ! Surface albedo [0-1]
-      snowc(i,j)  = snow_cov                       ! Snow coverage fraction [0-1]
-      
-      ! Note: snow(i,j), snowh(i,j), tsk(i,j) are updated by reference in C++ call
+      snow(i,j)   = REAL(snow_swe_c)                ! Update SWE
+      snowh(i,j)  = REAL(snow_depth_c)              ! Update snow depth
+      tsk(i,j)    = REAL(surface_temp_c)            ! Update surface temperature
+      hfx(i,j)    = REAL(heat_sens_c)               ! Sensible heat flux [W/m2]  
+      lh(i,j)     = REAL(heat_lat_c)                ! Latent heat flux [W/m2]
+      qfx(i,j)    = REAL(heat_lat_c) / 2.5e6        ! Moisture flux [kg/m2/s] (approx)
+      albedo(i,j) = REAL(albedo_c)                  ! Surface albedo [0-1]
+      snowc(i,j)  = REAL(snow_cov_c)                ! Snow coverage fraction [0-1]
 
     END DO JLOOP
     END DO ILOOP

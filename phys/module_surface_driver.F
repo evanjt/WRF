@@ -346,6 +346,7 @@ CONTAINS
                                        ,CLMSCHEME                 &
                                        ,CTSMSCHEME                &
                                        ,SSIBSCHEME                & !ssib
+                                       ,SNOWPACKSCHEME            &
                                        ,MYNNSFCSCHEME             &
                                        ,OMLSCHEME                 &
                                        ,PWP3DSCHEME               &
@@ -396,6 +397,7 @@ CONTAINS
    USE module_sf_sstskin
    USE module_sf_tmnupdate
    USE module_sf_lake
+   USE module_sf_snowpackdrv
    USE module_cpl, ONLY : coupler_on, cpl_rcv
    use module_ra_gfdleta, only: cal_mon_day
 !
@@ -4349,6 +4351,49 @@ CONTAINS
          CALL wrf_error_fatal('Lacking arguments for SSIB in surface driver')
        ENDIF
 !end ssib
+!-------------------------------------------------------------------
+
+     CASE (SNOWPACKSCHEME)
+
+       IF (PRESENT(qv_curr)    .AND.  PRESENT(rainbl)        .AND.    &
+                                                      .TRUE. ) THEN
+
+         CALL wrf_debug(100,'in SNOWPACK LSM')
+         
+         ! Call SNOWPACK driver - CRYOWRF-compatible interface  
+         CALL snowpacklsm(itimestep,xlat,xlong,dz8w,dt,dx,               &
+               ivgtyp,   isltyp,    xland,     xice,xice_threshold,       &
+               t_phy,     qv_curr,     u_phy,    v_phy,   swdown,   glw,  &
+               p8w,rainbl,                                                 &
+               tsk,      hfx,      qfx,        lh,   grdflx,    smstav,   &
+               smstot,sfcrunoff, udrunoff,    albedo,    snowc,     smois, &
+               sh2o,     tslb,     snow,     snowh,   canwat,    acsnom,  &
+               acsnow,    emiss,     qsfc,                                 &
+               z0,      znt,                                               &
+               ids,ide,  jds,jde,  kds,kde,                               &
+               ims,ime,  jms,jme,  kms,kme,                               &
+               i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte     )
+               
+         ! Calculate surface diagnostics
+         DO j=j_start(ij),j_end(ij)
+         DO i=i_start(ij),i_end(ij)
+           SFCEVP(I,J)= SFCEVP(I,J) + QFX(I,J)*DT
+           IF(PRESENT(ACHFX))ACHFX(I,J)=ACHFX(I,J) + HFX(I,J)*DT
+           IF(PRESENT(ACLHF))ACLHF(I,J)=ACLHF(I,J) + LH(I,J)*DT
+         ENDDO
+         ENDDO
+
+         CALL wrf_debug(100,'in SFCDIAGS')
+         CALL SFCDIAGS(hfx,qfx,tsk,qsfc,chs2,cqs2,t2,th2,q2,           &
+                    psfc,cp,r_d,rcp,CHS,t_phy,qv_curr,ua_phys,          &
+                    ids,ide, jds,jde, kds,kde,                          &
+                    ims,ime, jms,jme, kms,kme,                          &
+                    i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte )
+
+       ELSE
+         CALL wrf_error_fatal('Lacking arguments for SNOWPACK in surface driver')
+       ENDIF
+
 !-------------------------------------------------------------------
 
      CASE DEFAULT

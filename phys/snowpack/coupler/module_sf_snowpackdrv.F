@@ -1,21 +1,17 @@
 !WRF:MODEL_LAYER:PHYSICS
 !
-! ** SNOWPACK Driver for WRF **
-! Integration with WRF surface driver following modern patterns
-! Replaces complex CRYOWRF coupling with clean interface
+! SNOWPACK Land Surface Model Driver
+! WRF interface driver for SNOWPACK physics integration
 !
 MODULE module_sf_snowpackdrv
 
 CONTAINS
 
 !-------------------------------------------------------------------
-SUBROUTINE snowpacklsm(ITIMESTEP,        YR,   JULIAN,   COSZIN,XLAT,XLONG, & ! IN : Time/Space-related
-               DZ8W,       DT,       DZS,    NSOIL,       DX,            & ! IN : Model configuration 
-               IVGTYP,   ISLTYP,    VEGFRA,   VEGMAX,      TMN,            & ! IN : Vegetation/Soil characteristics
-               XLAND,     XICE,XICE_THRES,  CROPCAT,                      & ! IN : Vegetation/Soil characteristics
-               T3D,     QV3D,     U_PHY,    V_PHY,   SWDOWN,     SWDDIR, & ! IN : Atmospheric state
-               SWDDIF,      GLW,                                           & ! IN : Forcing
-               P8W3D,PRECIP_IN,        SR,                                & ! IN : Forcing
+SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-related
+               IVGTYP,   ISLTYP,    XLAND,     XICE,XICE_THRESHOLD,       & ! IN : Vegetation/Soil characteristics  
+               T_PHY,   QV_CURR,   U_PHY,    V_PHY,   SWDOWN,      GLW,   & ! IN : Atmospheric state
+               P8W,RAINBL,                                                & ! IN : Forcing
                TSK,      HFX,      QFX,        LH,   GRDFLX,    SMSTAV, & ! IN/OUT LSM eqv
                SMSTOT,SFCRUNOFF, UDRUNOFF,    ALBEDO,    SNOWC,     SMOIS, & ! IN/OUT LSM eqv
                SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
@@ -29,40 +25,31 @@ SUBROUTINE snowpacklsm(ITIMESTEP,        YR,   JULIAN,   COSZIN,XLAT,XLONG, & ! 
     IMPLICIT NONE
 !-------------------------------------------------------------------
 
+! Parameters
+    INTEGER, PARAMETER :: nsoil = 4  ! Number of soil layers (standard WRF Noah)
+
 ! IN only
     INTEGER,                                         INTENT(IN   ) ::  ITIMESTEP ! timestep number
-    INTEGER,                                         INTENT(IN   ) ::  YR        ! 4-digit year
-    REAL,                                            INTENT(IN   ) ::  JULIAN    ! Julian day
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  COSZIN    ! cosine zenith angle
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  XLAT      ! latitude [rad]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  XLONG     ! longitude [rad]
     REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  DZ8W      ! thickness of atmo layers [m]
     REAL,                                            INTENT(IN   ) ::  DT        ! timestep [s]
-    REAL,    DIMENSION(1:nsoil),                     INTENT(IN   ) ::  DZS       ! thickness of soil layers [m]
-    INTEGER,                                         INTENT(IN   ) ::  NSOIL     ! number of soil layers
     REAL,                                            INTENT(IN   ) ::  DX        ! horizontal grid spacing [m]
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  IVGTYP    ! vegetation type
     INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  ISLTYP    ! soil type
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  VEGFRA    ! vegetation fraction
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  VEGMAX    ! annual max vegetation fraction
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  TMN       ! deep-layer soil temperature
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  XLAND     ! land mask (1 for land, 2 for water)
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  XICE      ! sea ice flag
-    REAL,                                            INTENT(IN   ) ::  XICE_THRES! sea ice threshold
-    INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  CROPCAT   ! crop category
+    REAL,                                            INTENT(IN   ) ::  XICE_THRESHOLD! sea ice threshold
 
 ! Atmospheric state
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  T3D       ! 3D temperature [K]
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  QV3D      ! 3D water vapor [kg/kg]
+    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  T_PHY     ! 3D temperature [K]
+    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  QV_CURR   ! 3D water vapor [kg/kg]
     REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  U_PHY     ! 3D u-wind [m/s]
     REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  V_PHY     ! 3D v-wind [m/s]
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SWDOWN    ! downward SW flux at surface [W/m2]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SWDDIR    ! downward direct SW flux at surface [W/m2]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SWDDIF    ! downward diffuse SW flux at surface [W/m2]  
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  GLW       ! downward LW flux at surface [W/m2]
-    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  P8W3D     ! 3D pressure [Pa]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  PRECIP_IN ! precipitation rate [mm/s]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  SR        ! fraction of frozen precipitation
+    REAL,    DIMENSION( ims:ime, kms:kme, jms:jme ), INTENT(IN   ) ::  P8W       ! 3D pressure [Pa]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(IN   ) ::  RAINBL    ! precipitation rate [mm/s]
 
 ! INOUT (with generic LSM equivalent)
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  TSK       ! surface radiative temperature [K]
@@ -102,8 +89,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,        YR,   JULIAN,   COSZIN,XLAT,XLONG, & ! 
 
     CALL snowpack_driver( &
         itimestep, dt, &
-        t3d, qv3d, u_phy, v_phy, p8w3d, dz8w, &      ! Atmospheric state
-        swdown, glw, precip_in, &                     ! Forcing  
+        t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &   ! Atmospheric state
+        swdown, glw, rainbl, &                        ! Forcing  
         tsk, hfx, qfx, lh, albedo, snowc, &           ! Surface fluxes
         snow, snowh, qsfc, &                          ! Snow states
         ids,ide, jds,jde, kds,kde, &                  ! Dimensions  
@@ -128,8 +115,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,        YR,   JULIAN,   COSZIN,XLAT,XLONG, & ! 
         ZNT(I,J) = Z0(I,J)  ! Thermal roughness = momentum roughness
         
         ! Accumulate snowfall and melt (simplified)
-        IF(PRECIP_IN(I,J) > 0.0 .AND. T3D(I,1,J) < 273.15) THEN
-            ACSNOW(I,J) = ACSNOW(I,J) + PRECIP_IN(I,J) * DT
+        IF(RAINBL(I,J) > 0.0 .AND. T_PHY(I,1,J) < 273.15) THEN
+            ACSNOW(I,J) = ACSNOW(I,J) + RAINBL(I,J) * DT
         END IF
         
         ! Simple snow melt accumulation

@@ -174,8 +174,10 @@ RUN cd ${BASE_DIR} && \
     cd .. && \
     rm -rf jasper*
 
-# Stage 2: Copy WRF source and verify dependencies
+# Stage 2: Copy WRF source code (optimized for caching)
 FROM libraries-build AS wrf-source
+
+# Copy entire WRF source tree (dockerignore filters out unnecessary files)
 COPY --chown=wrfuser:wrfuser . ${BASE_DIR}/WRF/
 
 # Verify WRF source structure and dependencies
