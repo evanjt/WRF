@@ -164,6 +164,7 @@ MODULES = \
 	module_sf_pxlsm.o \
 	module_sf_pxlsm_data.o \
 	module_sf_ruclsm.o \
+	module_snowpack_types.o \
 	module_sf_snowpackdrv.o \
 	module_sf_snowpack.o \
 	snowpack_wrf_bridge.o \

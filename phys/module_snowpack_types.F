@@ -246,8 +246,9 @@ END SUBROUTINE unpack_interface_to_wrf
 !-------------------------------------------------------------------
 SUBROUTINE snowpack_physics_structured(interface_data)
 !-------------------------------------------------------------------
-! Structured interface to SNOWPACK physics
+! Structured interface to SNOWPACK physics with layer extraction
 !-------------------------------------------------------------------
+    USE module_sf_snowpack, ONLY: snowpack_physics_layers_c
     TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
     
     ! Local variables for C interface
@@ -256,6 +257,19 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     INTEGER :: i_grid, j_grid
     REAL(8) :: snow_swe, snow_depth, surface_temp
     REAL(8) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
+    
+    ! Layer arrays for detailed extraction
+    INTEGER :: n_layers
+    REAL(8), DIMENSION(50) :: layer_temp, layer_thick
+    REAL(8), DIMENSION(50) :: layer_vol_ice, layer_vol_water, layer_vol_air
+    REAL(8), DIMENSION(50) :: layer_grain_radius, layer_bond_radius
+    REAL(8), DIMENSION(50) :: layer_dendricity, layer_sphericity
+    
+    ! Budget tracking variables
+    REAL(8) :: mass_precip, mass_sublim, mass_melt
+    REAL(8) :: energy_lw_in, energy_sensible, energy_latent
+    
+    INTEGER :: k
     
     ! Pack data for C interface
     temp_air = DBLE(interface_data%atmos%temperature)
@@ -275,14 +289,19 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     snow_swe = DBLE(interface_data%surface%snow_swe)
     snow_depth = DBLE(interface_data%surface%snow_depth)
     
-    ! Call SNOWPACK physics
-    CALL snowpack_physics_c(temp_air, humidity, wind_speed, wind_dir, &
-                           shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-                           i_grid, j_grid, &
-                           snow_swe, snow_depth, surface_temp, &
-                           heat_flux_sensible, heat_flux_latent, albedo, snow_coverage)
+    ! Call SNOWPACK physics with layer extraction
+    CALL snowpack_physics_layers_c(temp_air, humidity, wind_speed, wind_dir, &
+                                   shortwave_in, longwave_in, precipitation, pressure, height, dt, &
+                                   i_grid, j_grid, &
+                                   snow_swe, snow_depth, surface_temp, &
+                                   heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
+                                   n_layers, &
+                                   layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
+                                   layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
+                                   mass_precip, mass_sublim, mass_melt, &
+                                   energy_lw_in, energy_sensible, energy_latent)
     
-    ! Unpack results back to interface structure
+    ! Unpack surface results back to interface structure
     interface_data%surface%snow_swe = REAL(snow_swe)
     interface_data%surface%snow_depth = REAL(snow_depth) 
     interface_data%surface%surface_temp = REAL(surface_temp)
@@ -291,19 +310,50 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     interface_data%surface%albedo = REAL(albedo)
     interface_data%surface%snow_coverage = REAL(snow_coverage)
     
-    ! Update mass budgets if enabled
+    ! Store extracted layer data
+    interface_data%layers%n_layers = n_layers
+    DO k = 1, MIN(n_layers, MAX_SNOW_LAYERS)
+        interface_data%layers%layer_temp(k) = REAL(layer_temp(k))
+        interface_data%layers%layer_thick(k) = REAL(layer_thick(k))
+        interface_data%layers%vol_ice(k) = REAL(layer_vol_ice(k))
+        interface_data%layers%vol_water(k) = REAL(layer_vol_water(k))
+        interface_data%layers%vol_air(k) = REAL(layer_vol_air(k))
+        interface_data%layers%grain_radius(k) = REAL(layer_grain_radius(k))
+        interface_data%layers%bond_radius(k) = REAL(layer_bond_radius(k))
+        interface_data%layers%dendricity(k) = REAL(layer_dendricity(k))
+        interface_data%layers%sphericity(k) = REAL(layer_sphericity(k))
+    END DO
+    
+    ! Clear unused layers
+    DO k = n_layers+1, MAX_SNOW_LAYERS
+        interface_data%layers%layer_temp(k) = 0.0
+        interface_data%layers%layer_thick(k) = 0.0
+        interface_data%layers%vol_ice(k) = 0.0
+        interface_data%layers%vol_water(k) = 0.0
+        interface_data%layers%vol_air(k) = 0.0
+        interface_data%layers%grain_radius(k) = 0.0
+        interface_data%layers%bond_radius(k) = 0.0
+        interface_data%layers%dendricity(k) = 0.0
+        interface_data%layers%sphericity(k) = 0.0
+    END DO
+    
+    ! Store mass budget data
+    interface_data%budgets%mass_precip = REAL(mass_precip)
+    interface_data%budgets%mass_sublim = REAL(mass_sublim)
+    interface_data%budgets%mass_melt = REAL(mass_melt)
+    
+    ! Store energy budget data
+    interface_data%budgets%energy_lw_in = REAL(energy_lw_in)
+    interface_data%budgets%energy_sensible = REAL(energy_sensible)
+    interface_data%budgets%energy_latent = REAL(energy_latent)
+    
+    ! Calculate additional budget components if enabled
     IF (interface_data%config%enable_mass_budgets) THEN
         CALL update_mass_budgets_structured(interface_data)
     END IF
     
-    ! Update energy budgets if enabled
     IF (interface_data%config%enable_energy_budgets) THEN
         CALL update_energy_budgets_structured(interface_data)
-    END IF
-    
-    ! Extract detailed layer data if enabled
-    IF (interface_data%config%enable_detailed_layers) THEN
-        CALL extract_layer_diagnostics_structured(interface_data)
     END IF
     
 END SUBROUTINE snowpack_physics_structured
@@ -357,25 +407,10 @@ END SUBROUTINE update_energy_budgets_structured
 !-------------------------------------------------------------------
 SUBROUTINE extract_layer_diagnostics_structured(interface_data)
 !-------------------------------------------------------------------
+    ! This routine is now obsolete - layer extraction happens directly in snowpack_physics_structured
+    ! Kept for backward compatibility but does nothing
     TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
-    
-    ! For now, just set basic layer info based on total depth
-    IF (interface_data%surface%snow_depth > 0.01) THEN
-        ! Simple single-layer approximation (will be replaced with actual SNOWPACK data)
-        interface_data%layers%n_layers = 1
-        interface_data%layers%layer_temp(1) = interface_data%surface%surface_temp
-        interface_data%layers%layer_thick(1) = interface_data%surface%snow_depth
-        interface_data%layers%vol_ice(1) = 30.0  ! Approximate ice fraction [%]
-        interface_data%layers%vol_water(1) = 5.0  ! Approximate water fraction [%]
-        interface_data%layers%vol_air(1) = 65.0   ! Approximate air fraction [%]
-        interface_data%layers%grain_radius(1) = 0.5  ! Approximate grain size [mm]
-        interface_data%layers%bond_radius(1) = 0.1   ! Approximate bond size [mm]
-        interface_data%layers%dendricity(1) = 0.5    ! Approximate dendricity
-        interface_data%layers%sphericity(1) = 0.7    ! Approximate sphericity
-    ELSE
-        interface_data%layers%n_layers = 0
-    END IF
-    
+    ! Layer data is now populated directly from SNOWPACK in snowpack_physics_structured
 END SUBROUTINE extract_layer_diagnostics_structured
 
 END MODULE module_snowpack_types

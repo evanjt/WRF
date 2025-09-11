@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -117,10 +118,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     initialize_snowpack_config();
   } catch (const std::exception& e) {
     printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ Configuration failed: %s\n", e.what());
-    *surface_temp = temp_air;  // Fallback to air temperature
-    *snow_swe = 0.0;
-    *snow_depth = 0.0;
-    return;
+    printf("SNOWPACK-FATAL: Aborting WRF run due to SNOWPACK configuration failure\n");
+    std::abort();  // Abort instead of silent fallback
   }
 
   // CRYOWRF-style stateless approach: Create temporary objects for each call
@@ -223,15 +222,172 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   } catch (const std::exception& e) {
     printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ Error in grid (%d,%d): %s\n", 
            i_grid, j_grid, e.what());
+    printf("SNOWPACK-ERROR: Grid point (%d,%d) - Ta=%.2fK, RH=%.2f, Precip=%.3fmm\n", 
+           i_grid, j_grid, temp_air, humidity, precipitation);
+    printf("SNOWPACK-FATAL: Aborting WRF run due to SNOWPACK physics failure\n");
+    std::abort();  // Abort instead of silent fallback
+  }
+}
+
+// Enhanced interface with detailed layer extraction
+void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
+                             double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
+                             int i_grid, int j_grid,
+                             double* snow_swe, double* snow_depth, double* surface_temp,
+                             double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                             // Layer arrays (max 50 layers)
+                             int* n_layers,
+                             double* layer_temp, double* layer_thick, 
+                             double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
+                             double* layer_grain_radius, double* layer_bond_radius,
+                             double* layer_dendricity, double* layer_sphericity,
+                             // Budget tracking
+                             double* mass_precip, double* mass_sublim, double* mass_melt,
+                             double* energy_lw_in, double* energy_sensible, double* energy_latent) {
+  
+  // Track physics calls for debugging
+  static int call_count = 0;
+  call_count++;
+  
+  // Initialize configuration on first call (shared, read-only)
+  try {
+    initialize_snowpack_config();
+  } catch (const std::exception& e) {
+    printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Configuration failed: %s\n", e.what());
+    printf("SNOWPACK-FATAL: Aborting WRF run due to SNOWPACK configuration failure\n");
+    std::abort();  // Abort instead of silent fallback
+  }
+
+  // Stateless approach: Create temporary objects for each call
+  try {
+    // Create temporary SNOWPACK instance
+    Snowpack snowpack_instance(*global_config);
     
-    // Return safe fallback values
-    *surface_temp = temp_air;  
-    *snow_swe = 0.0;
-    *snow_depth = 0.0;
-    *heat_flux_sensible = 0.0;
-    *heat_flux_latent = 0.0;
-    *albedo = 0.2;  // Bare soil albedo
-    *snow_coverage = 0.0;
+    // Create temporary SnowStation
+    SnowStation snow_station(false, false, false, false);
+    
+    // Create temporary meteorological data
+    CurrentMeteo Mdata;
+    SurfaceFluxes surfFluxes;
+    BoundCond sn_Bdata;
+    
+    // Initialize snow station for this call
+    SN_SNOWSOIL_DATA ssdata;
+    ssdata.meta.stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
+                           std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    
+    // Set position with default coordinates
+    ssdata.meta.position.setLatLon(SnowpackConstants::DEFAULT_LATITUDE, 
+                                   SnowpackConstants::DEFAULT_LONGITUDE,
+                                   height);
+    
+    ssdata.Height = height;
+    ssdata.nN = 1;       // Start with 1 node (ground only)  
+    ssdata.nLayers = 0;  // No snow/soil layers initially
+    
+    // Initialize surface properties
+    ssdata.Albedo = 0.85;   // Default snow albedo
+    ssdata.SoilAlb = 0.2;   // Default soil albedo
+    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_METERS;
+    ssdata.HS_last = 0.0;   // No previous snow height
+    ssdata.Ldata.clear();   // No layer data
+    
+    // Initialize station
+    snow_station.initialize(ssdata, 0);
+    
+    // Set up current meteorology
+    mio::Date current_time(2010, 7, 16, 0, 0, 0.0, 0.0);
+    
+    // Temperature sanity check
+    double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN, 
+                               std::min(temp_air, SnowpackConstants::T_CRAZY_MAX_KELVIN));
+    
+    // Fill meteorological data structure
+    Mdata.date = current_time;
+    Mdata.ta = safe_temp;
+    Mdata.rh = std::max(0.01, std::min(1.0, humidity));
+    Mdata.vw = std::max(0.1, wind_speed);
+    Mdata.dw = wind_dir;
+    Mdata.iswr = std::max(0.0, shortwave_in);
+    Mdata.lw_net = std::max(0.0, longwave_in);
+    Mdata.psum = std::max(0.0, precipitation);
+    Mdata.psum_ph = (safe_temp < 273.65) ? 0.0 : 1.0;
+    Mdata.tss = mio::IOUtils::nodata;
+    Mdata.ts0 = safe_temp - 5.0;
+    Mdata.hs = *snow_depth;
+    
+    // Execute SNOWPACK physics
+    double cumu_precip = 0.0;
+    snowpack_instance.runSnowpackModel(Mdata, snow_station, cumu_precip, sn_Bdata, surfFluxes);
+    
+    // Extract basic results
+    *surface_temp = (snow_station.Ndata.size() > 0) ? snow_station.Ndata.back().T : temp_air;
+    *snow_swe = snow_station.swe;
+    *snow_depth = snow_station.cH;
+    *heat_flux_sensible = surfFluxes.qs;
+    *heat_flux_latent = surfFluxes.ql;
+    *albedo = snow_station.Albedo;
+    *snow_coverage = (*snow_depth > 0.001) ? 1.0 : 0.0;
+    
+    // Extract detailed layer information from SnowStation
+    size_t num_elements = snow_station.getNumberOfElements();
+    *n_layers = static_cast<int>(num_elements);
+    
+    // Limit to max 50 layers for WRF arrays
+    size_t layers_to_extract = std::min(num_elements, size_t(50));
+    
+    for (size_t i = 0; i < layers_to_extract; i++) {
+      const ElementData& elem = snow_station.Edata[i];
+      
+      // Layer properties
+      layer_temp[i] = elem.Te;                              // Element temperature [K]
+      layer_thick[i] = elem.L;                              // Element thickness [m]
+      layer_vol_ice[i] = elem.theta[ICE] * 100.0;          // Ice volume fraction [%]
+      layer_vol_water[i] = elem.theta[WATER] * 100.0;      // Water volume fraction [%]  
+      layer_vol_air[i] = elem.theta[AIR] * 100.0;          // Air volume fraction [%]
+      
+      // Grain properties
+      layer_grain_radius[i] = elem.rg;                      // Grain radius [mm]
+      layer_bond_radius[i] = elem.rb;                       // Bond radius [mm]
+      layer_dendricity[i] = elem.dd;                        // Dendricity [-]
+      layer_sphericity[i] = elem.sp;                        // Sphericity [-]
+    }
+    
+    // Clear unused layers
+    for (size_t i = layers_to_extract; i < 50; i++) {
+      layer_temp[i] = 0.0;
+      layer_thick[i] = 0.0;
+      layer_vol_ice[i] = 0.0;
+      layer_vol_water[i] = 0.0;
+      layer_vol_air[i] = 0.0;
+      layer_grain_radius[i] = 0.0;
+      layer_bond_radius[i] = 0.0;
+      layer_dendricity[i] = 0.0;
+      layer_sphericity[i] = 0.0;
+    }
+    
+    // Extract mass budget information from SurfaceFluxes
+    *mass_precip = surfFluxes.mass[SurfaceFluxes::MS_RAIN] + 
+                   surfFluxes.mass[SurfaceFluxes::MS_SNOW];     // Total precipitation [kg/m²]
+    *mass_sublim = surfFluxes.mass[SurfaceFluxes::MS_SUBLIMATION]; // Sublimation [kg/m²]
+    *mass_melt = surfFluxes.mass[SurfaceFluxes::MS_SNOWPACK_RUNOFF]; // Melt runoff [kg/m²]
+    
+    // Extract energy budget information
+    *energy_lw_in = Mdata.lw_net;                           // Net LW radiation [W/m²]
+    *energy_sensible = surfFluxes.qs;                       // Sensible heat flux [W/m²]
+    *energy_latent = surfFluxes.ql;                         // Latent heat flux [W/m²]
+    
+    if (call_count <= 5) {
+      printf("SNOWPACK-LAYERS [C++]: Grid (%d,%d) - %d layers, T_sfc=%.1fK, SWE=%.2fmm, depth=%.2fm\n",
+             i_grid, j_grid, *n_layers, *surface_temp, *snow_swe, *snow_depth);
+    }
+    
+  } catch (const std::exception& e) {
+    printf("SNOWPACK-ERROR [C++]: Error in grid (%d,%d): %s\n", i_grid, j_grid, e.what());
+    printf("SNOWPACK-ERROR: Grid point (%d,%d) - Ta=%.2fK, RH=%.2f, Precip=%.3fmm\n", 
+           i_grid, j_grid, temp_air, humidity, precipitation);
+    printf("SNOWPACK-FATAL: Aborting WRF run due to SNOWPACK physics failure\n");
+    std::abort();  // Abort instead of silent fallback
   }
 }
 
