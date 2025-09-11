@@ -161,29 +161,28 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     snow_station.initialize(ssdata, 0);  // Initialize with sector 0
     
     // Set up current meteorology
-    mio::Date current_time;  // Default time is fine for physics
-    current_time.setFromComponents(2010, 7, 16, 0, 0, 0.0);  // Dummy date
+    mio::Date current_time(2010, 7, 16, 0, 0, 0.0, 0.0);  // Dummy date with timezone
     
     // Temperature sanity check
     double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN, 
                                std::min(temp_air, SnowpackConstants::T_CRAZY_MAX_KELVIN));
     
-    // Fill meteorological data structure
+    // Fill meteorological data structure using correct SNOWPACK API
     Mdata.date = current_time;
-    Mdata(MeteoData::TA) = safe_temp;          // Air temperature [K]
-    Mdata(MeteoData::RH) = std::max(0.01, std::min(1.0, humidity));  // Relative humidity [0-1]
-    Mdata(MeteoData::VW) = std::max(0.1, wind_speed);                // Wind speed [m/s] 
-    Mdata(MeteoData::DW) = wind_dir;                                 // Wind direction [degrees]
-    Mdata(MeteoData::ISWR) = std::max(0.0, shortwave_in);           // Incoming shortwave [W/m²]
-    Mdata(MeteoData::ILWR) = std::max(0.0, longwave_in);            // Incoming longwave [W/m²] 
-    Mdata(MeteoData::PSUM) = std::max(0.0, precipitation);          // Precipitation [mm]
-    Mdata(MeteoData::P) = pressure;                                  // Pressure [Pa]
+    Mdata.ta = safe_temp;                                       // Air temperature [K]
+    Mdata.rh = std::max(0.01, std::min(1.0, humidity));       // Relative humidity [0-1]
+    Mdata.vw = std::max(0.1, wind_speed);                     // Wind speed [m/s] 
+    Mdata.dw = wind_dir;                                       // Wind direction [degrees]
+    Mdata.iswr = std::max(0.0, shortwave_in);                 // Incoming shortwave [W/m²]
+    Mdata.lw_net = std::max(0.0, longwave_in);               // Net longwave radiation [W/m²] 
+    Mdata.psum = std::max(0.0, precipitation);                // Precipitation [mm]
+    // Note: CurrentMeteo has no pressure field - pressure used internally by SNOWPACK
     
     // Additional required meteorological parameters
-    Mdata(MeteoData::PSUM_PH) = (safe_temp < 273.65) ? 0.0 : 1.0;  // Precipitation phase (0=snow, 1=rain)
-    Mdata(MeteoData::TSS) = mio::IOUtils::nodata;                   // Surface temperature (let SNOWPACK compute)
-    Mdata(MeteoData::TSG) = safe_temp - 5.0;                        // Ground temperature estimate
-    Mdata(MeteoData::HS) = *snow_depth;                             // Current snow height [m]
+    Mdata.psum_ph = (safe_temp < 273.65) ? 0.0 : 1.0;        // Precipitation phase (0=snow, 1=rain)
+    Mdata.tss = mio::IOUtils::nodata;                         // Surface temperature (let SNOWPACK compute)
+    Mdata.ts0 = safe_temp - 5.0;                              // Bottom temperature estimate
+    Mdata.hs = *snow_depth;                                   // Current snow height [m]
     
     // Run SNOWPACK model (temporary objects will auto-destruct)
     if (call_count <= 3) {
@@ -191,22 +190,23 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
              i_grid, j_grid, precipitation);
     }
     
-    // Execute SNOWPACK physics
-    snowpack_instance.runSnowpackModel(Mdata, snow_station, sn_Bdata, surfFluxes);
+    // Execute SNOWPACK physics (correct API with cumulative precipitation parameter)
+    double cumu_precip = 0.0;  // Cumulative precipitation parameter  
+    snowpack_instance.runSnowpackModel(Mdata, snow_station, cumu_precip, sn_Bdata, surfFluxes);
     
     if (call_count <= 3) {
       printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SNOWPACK model completed successfully for grid (%d,%d)\n", 
              i_grid, j_grid);
     }
     
-    // Extract results from SNOWPACK
-    *surface_temp = snow_station.Sdata.front().T;                    // Surface temperature [K]
-    *snow_swe = snow_station.SWE;                                    // Snow water equivalent [mm]
-    *snow_depth = snow_station.getHS();                             // Snow height [m]
-    *heat_flux_sensible = surfFluxes.qs;                           // Sensible heat flux [W/m²]
-    *heat_flux_latent = surfFluxes.ql;                             // Latent heat flux [W/m²]
-    *albedo = snow_station.Albedo;                                 // Surface albedo [0-1]
-    *snow_coverage = (*snow_depth > 0.001) ? 1.0 : 0.0;           // Simple snow coverage [0-1]
+    // Extract results from SNOWPACK (using correct member names)
+    *surface_temp = (snow_station.Ndata.size() > 0) ? snow_station.Ndata.back().T : temp_air;  // Surface temperature [K]
+    *snow_swe = snow_station.swe;                                  // Snow water equivalent [mm]
+    *snow_depth = snow_station.cH;                                // Snow height [m]
+    *heat_flux_sensible = surfFluxes.qs;                          // Sensible heat flux [W/m²]
+    *heat_flux_latent = surfFluxes.ql;                            // Latent heat flux [W/m²]
+    *albedo = snow_station.Albedo;                                // Surface albedo [0-1]
+    *snow_coverage = (*snow_depth > 0.001) ? 1.0 : 0.0;          // Simple snow coverage [0-1]
     
     // Consistency checks and fallbacks
     if (*snow_depth > 0.001 && *snow_swe <= 0.0) {
