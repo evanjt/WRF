@@ -32,21 +32,44 @@ void initialize_snowpack_config() {
   // Create empty config first, then add keys
   mio::Config base_config;
 
-  // Basic SNOWPACK configuration for WRF coupling
-  base_config.addKey("CALCULATION_STEP_LENGTH", "Config", "900.0");  // 15 minutes
-  base_config.addKey("SNOW_METAMORPHISM", "SnowpackAdvanced", "NIED");
-  base_config.addKey("WATER_TRANSPORT", "SnowpackAdvanced", "BUCKET");
-  base_config.addKey("CANOPY", "Snowpack", "false");
-  base_config.addKey("SW_MODE", "Snowpack", "BOTH");
-  base_config.addKey("HEIGHT_OF_METEO_VALUES", "Input", "2.0");
-  base_config.addKey("HEIGHT_OF_WIND_VALUE", "Input", "10.0");
-  base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "false");
-  base_config.addKey("SNOW_EROSION", "SnowpackAdvanced", "false");
-  base_config.addKey("Alpine3D", "Snowpack", "false");
-  base_config.addKey("RESEARCH", "SnowpackAdvanced", "false");
-  base_config.addKey("METEO", "Input", "false");
-  base_config.addKey("HARDNESS_PARAMETERIZATION", "SnowpackAdvanced", "MONTI");
-  base_config.addKey("CHANGE_BC", "SnowpackAdvanced", "false");
+  // SNOWPACK configuration matching CRYOWRF exactly
+  // [Snowpack] section - core settings
+  base_config.addKey("CALCULATION_STEP_LENGTH", "Snowpack", "15.0");  // 15 minutes like CRYOWRF
+  base_config.addKey("MEAS_TSS", "Snowpack", "FALSE");
+  base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "FALSE");
+  base_config.addKey("SW_MODE", "Snowpack", "INCOMING");
+  base_config.addKey("INCOMING_LONGWAVE", "Snowpack", "TRUE");
+  base_config.addKey("HEIGHT_OF_WIND_VALUE", "Snowpack", "30");
+  base_config.addKey("HEIGHT_OF_METEO_VALUES", "Snowpack", "30");
+  base_config.addKey("ATMOSPHERIC_STABILITY", "Snowpack", "MO_HOLTSLAG");
+  base_config.addKey("ROUGHNESS_LENGTH", "Snowpack", "0.01");
+  base_config.addKey("NUMBER_SLOPES", "Snowpack", "1");
+  base_config.addKey("CHANGE_BC", "Snowpack", "FALSE");
+  base_config.addKey("SNP_SOIL", "Snowpack", "FALSE");
+  base_config.addKey("SOIL_FLUX", "Snowpack", "TRUE");
+  base_config.addKey("GEO_HEAT", "Snowpack", "0.06");
+  base_config.addKey("CANOPY", "Snowpack", "0");
+  base_config.addKey("FORCING", "Snowpack", "ATMOS");
+  
+  // [SnowpackAdvanced] section - advanced settings
+  base_config.addKey("VARIANT", "SnowpackAdvanced", "DEFAULT");
+  base_config.addKey("RESEARCH_MODE", "SnowpackAdvanced", "TRUE");
+  base_config.addKey("ALLOW_ADAPTIVE_TIMESTEPPING", "SnowpackAdvanced", "TRUE");
+  base_config.addKey("SNOW_EROSION", "SnowpackAdvanced", "FALSE");
+  base_config.addKey("DETECT_GRASS", "SnowpackAdvanced", "TRUE");
+  base_config.addKey("HN_DENSITY", "SnowpackAdvanced", "PARAMETERIZED");
+  base_config.addKey("HN_DENSITY_PARAMETERIZATION", "SnowpackAdvanced", "ZWART");
+  base_config.addKey("AVG_METHOD_HYDRAULIC_CONDUCTIVITY", "SnowpackAdvanced", "ARITHMETICMEAN");
+  base_config.addKey("WATERTRANSPORTMODEL_SNOW", "SnowpackAdvanced", "RICHARDSEQUATION");
+  base_config.addKey("WATERTRANSPORTMODEL_SOIL", "SnowpackAdvanced", "RICHARDSEQUATION");
+  base_config.addKey("ENABLE_VAPOUR_TRANSPORT", "SnowpackAdvanced", "FALSE");
+  base_config.addKey("ENABLE_VAPOUR_TRANSPORT_SOIL", "SnowpackAdvanced", "FALSE");
+  base_config.addKey("WATER_VAPOR_TRANSPORT_TIMESTEP", "SnowpackAdvanced", "60");
+  base_config.addKey("WATER_VAPOR_TRANSPORT_IMPLICIT_FACTOR", "SnowpackAdvanced", "1.0");
+  base_config.addKey("MEAS_INCOMING_LONGWAVE", "SnowpackAdvanced", "TRUE");
+  base_config.addKey("FORCE_ADD_SNOWFALL", "SnowpackAdvanced", "FALSE");
+  base_config.addKey("T_CRAZY_MAX", "SnowpackAdvanced", "400.0");
+  base_config.addKey("T_CRAZY_MIN", "SnowpackAdvanced", "100.0");
 
   global_config = std::make_unique<SnowpackConfig>(base_config);
   config_initialized = true;
