@@ -45,20 +45,31 @@ namespace SnowpackConstants {
   // Water vapor transport settings
   constexpr int VAPOR_TRANSPORT_TIMESTEP_SEC = 60;  // Vapor transport sub-timestep [seconds]
   constexpr double VAPOR_IMPLICIT_FACTOR = 1.0;     // Fully implicit solver (most stable)
+  
+  // Default station metadata
+  const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
+  constexpr double DEFAULT_LATITUDE = 46.0;          // Default latitude for physics [degrees N]
+  constexpr double DEFAULT_LONGITUDE = 8.0;          // Default longitude for physics [degrees E]
 }
 
 // Initialize SNOWPACK configuration
 void initialize_snowpack_config() {
   if (config_initialized) return;
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SNOWPACK configuration...\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK Configuration Initialization START ===\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Using constants from SnowpackConstants namespace\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: - CALCULATION_STEP_MINUTES = %.1f\n", SnowpackConstants::CALCULATION_STEP_MINUTES);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: - T_CRAZY_MAX_KELVIN = %.1f K\n", SnowpackConstants::T_CRAZY_MAX_KELVIN);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: - T_CRAZY_MIN_KELVIN = %.1f K\n", SnowpackConstants::T_CRAZY_MIN_KELVIN);
 
   // Create empty config first, then add keys
   mio::Config base_config;
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Created empty mio::Config object\n");
 
   // SNOWPACK configuration matching CRYOWRF exactly
   // [Snowpack] section - core settings
   base_config.addKey("CALCULATION_STEP_LENGTH", "Snowpack", std::to_string(SnowpackConstants::CALCULATION_STEP_MINUTES));
+  base_config.addKey("METEO_STEP_LENGTH", "Snowpack", std::to_string(SnowpackConstants::CALCULATION_STEP_MINUTES));  // Same as CALCULATION_STEP_LENGTH in CRYOWRF
   base_config.addKey("MEAS_TSS", "Snowpack", "FALSE");
   base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "FALSE");
   base_config.addKey("SW_MODE", "Snowpack", "INCOMING");
@@ -95,10 +106,30 @@ void initialize_snowpack_config() {
   base_config.addKey("T_CRAZY_MAX", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MAX_KELVIN));
   base_config.addKey("T_CRAZY_MIN", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MIN_KELVIN));
 
-  global_config = std::make_unique<SnowpackConfig>(base_config);
-  config_initialized = true;
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === Creating SnowpackConfig ===\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Key sections added: [Snowpack], [SnowpackAdvanced]\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Critical keys configured:\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ CALCULATION_STEP_LENGTH = %.1f min\n", SnowpackConstants::CALCULATION_STEP_MINUTES);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ METEO_STEP_LENGTH = %.1f min\n", SnowpackConstants::CALCULATION_STEP_MINUTES);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ T_CRAZY_MAX = %.1f K\n", SnowpackConstants::T_CRAZY_MAX_KELVIN);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ T_CRAZY_MIN = %.1f K\n", SnowpackConstants::T_CRAZY_MIN_KELVIN);
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Configuration initialized successfully!\n");
+  try {
+    global_config = std::make_unique<SnowpackConfig>(base_config);
+    config_initialized = true;
+    
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowpackConfig created successfully!\n");
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK Configuration Initialization COMPLETE ===\n");
+  } catch (const mio::UnknownValueException& e) {
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ Missing configuration key: %s\n", e.what());
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: This key needs to be added to our bridge configuration\n");
+    throw;
+  } catch (const std::exception& e) {
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ SnowpackConfig creation failed: %s\n", e.what());
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: Exception type: %s\n", typeid(e).name());
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: Configuration will remain uninitialized\n");
+    throw;  // Re-throw to maintain error handling
+  }
 }
 
 // C interface for Fortran binding
@@ -117,36 +148,106 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
                       double* snow_coverage, double dt, int i_grid,
                       int j_grid) {
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: snowpack_physics() called for grid (%d,%d), temp=%.2fK\n", 
-         i_grid, j_grid, temp_air);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK PHYSICS CALL START ===\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Grid point: (%d,%d)\n", i_grid, j_grid);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Input meteorology:\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Temperature: %.2f K (%.2f°C)\n", temp_air, temp_air - 273.15);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Humidity: %.3f\n", humidity);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Wind speed: %.2f m/s\n", wind_speed);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Precipitation: %.3f mm\n", precipitation);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - SW radiation: %.2f W/m²\n", shortwave_in);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - LW radiation: %.2f W/m²\n", longwave_in);
   
   // Initialize configuration on first call
-  initialize_snowpack_config();
+  try {
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling initialize_snowpack_config()...\n");
+    initialize_snowpack_config();
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Configuration initialization completed\n");
+  } catch (const std::exception& e) {
+    printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ Configuration failed: %s\n", e.what());
+    *surface_temp = -999.0;  // Error indicators
+    *snow_swe = -999.0;
+    *snow_depth = -999.0;
+    return;  // Early return on config failure
+  }
 
   // Grid point identifier
   std::pair<int, int> grid_point(i_grid, j_grid);
+  
   // Create SNOWPACK instance for this grid point if it doesn't exist
   if (snowpack_instances.find(grid_point) == snowpack_instances.end()) {
-    snowpack_instances[grid_point] = std::make_unique<Snowpack>(*global_config);
-    snow_stations[grid_point] = SnowStation();
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Creating new SNOWPACK instance for grid (%d,%d)\n", i_grid, j_grid);
+    
+    try {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Constructing Snowpack object with global_config...\n");
+      snowpack_instances[grid_point] = std::make_unique<Snowpack>(*global_config);
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Snowpack object created successfully\n");
+      
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Creating SnowStation object...\n");
+      snow_stations[grid_point] = SnowStation();
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowStation object created successfully\n");
+    } catch (const std::exception& e) {
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SNOWPACK instance creation failed: %s\n", e.what());
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: This is likely a configuration error\n");
+      *surface_temp = -999.0;
+      *snow_swe = -999.0;
+      *snow_depth = -999.0;
+      return;
+    }
 
     // Initialize snow station with basic setup
     SnowStation& xdata = snow_stations[grid_point];
 
     // Create minimal initialization data for SNOWPACK
     SN_SNOWSOIL_DATA ssdata;
-    ssdata.meta.stationID =
-        "WRF_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
-    ssdata.meta.position.setXY(i_grid, j_grid,
-                               0.0);  // Grid coordinates as position
+    ssdata.meta.stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
+                           std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    
+    // Set position with default coordinates (SNOWPACK needs valid lat/lon)
+    ssdata.meta.position.setLatLon(SnowpackConstants::DEFAULT_LATITUDE, 
+                                   SnowpackConstants::DEFAULT_LONGITUDE,
+                                   height);  // Use actual elevation from WRF
+    
     ssdata.Height = height;
-    ssdata.nN = 1;       // Start with 1 node (ground)
-    ssdata.nLayers = 0;  // No snow layers initially
+    ssdata.nN = 1;       // Start with 1 node (ground only)  
+    ssdata.nLayers = 0;  // No snow/soil layers initially (SNP_SOIL = FALSE)
+    
+    // Initialize basic snow/soil properties
+    ssdata.Albedo = 0.85;  // Fresh snow albedo
+    ssdata.SoilAlb = 0.2;  // Soil albedo 
+    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_METERS;
+    
+    // Ensure LayerData is empty (no soil/snow layers, just bare ground)
+    ssdata.Ldata.clear();       // No layer data (matches nLayers = 0)
 
-    xdata.initialize(ssdata, 0);  // Initialize with sector 0
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SnowStation with:\n");
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Station ID: %s\n", ssdata.meta.stationID.c_str());
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Position: %.2f°N, %.2f°E, %.0fm\n", 
+           SnowpackConstants::DEFAULT_LATITUDE, SnowpackConstants::DEFAULT_LONGITUDE, height);
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Structure: nN=%zu, nLayers=%zu, Ldata.size=%zu\n", 
+           ssdata.nN, ssdata.nLayers, ssdata.Ldata.size());
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Configuration: SNP_SOIL=FALSE (bare ground only)\n");
+    
+    try {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling xdata.initialize()...\n");
+      xdata.initialize(ssdata, 0);  // Initialize with sector 0
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowStation initialized successfully\n");
+    } catch (const mio::IOException& e) {
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed: %s\n", e.what());
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: This is likely a soil layer configuration issue\n");
+      *surface_temp = -999.0;
+      *snow_swe = -999.0;
+      *snow_depth = -999.0;
+      return;
+    } catch (const std::exception& e) {
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed: %s\n", e.what());
+      *surface_temp = -999.0;
+      *snow_swe = -999.0;
+      *snow_depth = -999.0;
+      return;
+    }
 
-    printf("SNOWPACK-PHYSICS: Initialized grid point (%d,%d)\n", i_grid,
-           j_grid);
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Grid point (%d,%d) fully initialized\n", i_grid, j_grid);
   }
 
   // Get references to this grid point's SNOWPACK instance and data
@@ -224,8 +325,10 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     exit(1);
   }
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: snowpack_physics() completed for grid (%d,%d)\n", 
-         i_grid, j_grid);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK PHYSICS CALL SUCCESS ===\n");
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Grid (%d,%d) completed successfully\n", i_grid, j_grid);
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Output: T_sfc=%.2fK, SWE=%.3fmm, depth=%.3fm\n", 
+         *surface_temp, *snow_swe, *snow_depth);
 }
 
 }  // extern "C"
