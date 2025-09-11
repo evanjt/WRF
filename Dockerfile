@@ -20,7 +20,7 @@ ENV DIR=${BASE_DIR}/libs \
     INCLUDE_DIR=${BASE_DIR}/libs/include \
     BIN_DIR=${BASE_DIR}/libs/bin \
     RUN_DIR=${BASE_DIR}/run \
-    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib" \
+    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/snowpack/snowpack/lib:${BASE_DIR}/WRF/phys/snowpack/meteoio/lib" \
     PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
 
 # Compiler environment
@@ -190,12 +190,11 @@ FROM libraries-build AS wrf-source
 # Copy entire WRF source tree (dockerignore filters out unnecessary files)
 COPY --chown=wrfuser:wrfuser . ${BASE_DIR}/WRF/
 
-# Verify WRF source structure and initialize SNOWPACK submodules
+# Verify WRF source structure
 RUN cd ${BASE_DIR}/WRF && \
     test -f configure && \
     test -d Registry && \
-    test -d phys && \
-    find phys/snowpack -name "*.F" -o -name "*.cpp" >/dev/null 2>&1 || true
+    test -d phys
 
 # Stage 3: Configure and build WRF 
 FROM wrf-source AS wrf-build-attempt

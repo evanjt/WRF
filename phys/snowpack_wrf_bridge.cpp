@@ -26,22 +26,32 @@ static bool config_initialized = false;
 // Initialize SNOWPACK configuration
 void initialize_snowpack_config() {
   if (config_initialized) return;
+  
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SNOWPACK configuration...\n");
 
   // Create empty config first, then add keys
   mio::Config base_config;
 
   // Basic SNOWPACK configuration for WRF coupling
-  base_config.addKey("CALCULATION_STEP_LENGTH", "Config",
-                     "900.0");  // 15 minutes
+  base_config.addKey("CALCULATION_STEP_LENGTH", "Config", "900.0");  // 15 minutes
   base_config.addKey("SNOW_METAMORPHISM", "SnowpackAdvanced", "NIED");
   base_config.addKey("WATER_TRANSPORT", "SnowpackAdvanced", "BUCKET");
   base_config.addKey("CANOPY", "Snowpack", "false");
   base_config.addKey("SW_MODE", "Snowpack", "BOTH");
   base_config.addKey("HEIGHT_OF_METEO_VALUES", "Input", "2.0");
   base_config.addKey("HEIGHT_OF_WIND_VALUE", "Input", "10.0");
+  base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "false");
+  base_config.addKey("SNOW_EROSION", "SnowpackAdvanced", "false");
+  base_config.addKey("Alpine3D", "Snowpack", "false");
+  base_config.addKey("RESEARCH", "SnowpackAdvanced", "false");
+  base_config.addKey("METEO", "Input", "false");
+  base_config.addKey("HARDNESS_PARAMETERIZATION", "SnowpackAdvanced", "MONTI");
+  base_config.addKey("CHANGE_BC", "SnowpackAdvanced", "false");
 
   global_config = std::make_unique<SnowpackConfig>(base_config);
   config_initialized = true;
+  
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Configuration initialized successfully!\n");
 }
 
 // C interface for Fortran binding
@@ -59,6 +69,10 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
                       double* heat_flux_latent, double* albedo,
                       double* snow_coverage, double dt, int i_grid,
                       int j_grid) {
+  
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: snowpack_physics() called for grid (%d,%d), temp=%.2fK\n", 
+         i_grid, j_grid, temp_air);
+  
   // Initialize configuration on first call
   initialize_snowpack_config();
 
@@ -119,8 +133,14 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
   static double cumu_precip = 0.0;
 
   try {
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling SNOWPACK model for grid (%d,%d), precip=%.3f\n", 
+           i_grid, j_grid, mdata.psum);
+    
     // Call SNOWPACK model for this timestep
     snowpack.runSnowpackModel(mdata, xdata, cumu_precip, bdata, sdata);
+    
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SNOWPACK model completed successfully for grid (%d,%d)\n", 
+           i_grid, j_grid);
 
     // Extract results for WRF
     *surface_temp =
@@ -156,6 +176,9 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     // Force program termination to prevent corrupted model state
     exit(1);
   }
+  
+  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: snowpack_physics() completed for grid (%d,%d)\n", 
+         i_grid, j_grid);
 }
 
 }  // extern "C"

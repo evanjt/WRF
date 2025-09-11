@@ -290,9 +290,13 @@ submodules :
 		echo Initializing SNOWPACK submodules ; \
 		( cd .. ; git submodule update --init --recursive ) ; \
 		echo Building MeteoIO library ; \
-		( cd snowpack/meteoio && mkdir -p build && cd build && cmake .. && make -j 4 ) ; \
+		( cd snowpack/meteoio && mkdir -p build && cd build && \
+		  cmake .. -DCMAKE_INSTALL_PREFIX=../lib -DCMAKE_BUILD_TYPE=Release && \
+		  make -j 4 && make install ) ; \
 		echo Building SNOWPACK library ; \
-		( cd snowpack/snowpack && mkdir -p build && cd build && cmake .. -DMETEOIO_ROOT=../../meteoio/build && make -j 4 ) ; \
+		( cd snowpack/snowpack && mkdir -p build && cd build && \
+		  cmake .. -DCMAKE_INSTALL_PREFIX=../lib -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/lib && \
+		  make -j 4 && make install ) ; \
 	else \
 		echo SNOWPACK libraries already built ; \
 	fi

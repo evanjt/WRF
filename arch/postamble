@@ -61,7 +61,16 @@ INCLUDE_MODULES =    $(MODULE_SRCH_FLAG) \
 REGISTRY        =    Registry
 CC_TOOLS_CFLAGS = CONFIGURE_NMM_CORE
 
-LIB             =    $(LIB_BUNDLED) $(LIB_EXTERNAL) $(LIB_LOCAL) $(LIB_WRF_HYDRO) CONFIGURE_CTSM_LIB
+# SNOWPACK configuration - set to 1 to enable, 0 to disable
+SNOWPACK        = 1
+
+ifeq ($(SNOWPACK), 1)
+SNOWPACK_LIB    = $(WRF_SRC_ROOT_DIR)/phys/snowpack/snowpack/lib/libsnowpack.so $(WRF_SRC_ROOT_DIR)/phys/snowpack/meteoio/lib/libmeteoio.so
+else
+SNOWPACK_LIB    = 
+endif
+
+LIB             =    $(LIB_BUNDLED) $(LIB_EXTERNAL) $(LIB_LOCAL) $(LIB_WRF_HYDRO) CONFIGURE_CTSM_LIB $(SNOWPACK_LIB)
 LDFLAGS         =    $(OMP) $(FCFLAGS) $(LDFLAGS_LOCAL) CONFIGURE_LDFLAGS
 ENVCOMPDEFS     =    CONFIGURE_COMPILEFLAGS
 CPPFLAGS        =    $(ARCHFLAGS) $(ENVCOMPDEFS) -I$(LIBINCLUDE) $(TRADFLAG) CONFIGURE_COMMS_INCLUDE
