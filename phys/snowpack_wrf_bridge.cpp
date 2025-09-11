@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <map>
 #include <memory>
+#include <string>
 
 // SNOWPACK v11.08 headers - relative paths from phys/snowpack/
 #include "meteoio/meteoio/MeteoIO.h"
@@ -23,6 +24,29 @@ static std::map<std::pair<int, int>, SnowStation> snow_stations;
 static std::unique_ptr<SnowpackConfig> global_config;
 static bool config_initialized = false;
 
+// SNOWPACK Configuration Constants
+namespace SnowpackConstants {
+  // Timestep configuration
+  constexpr double CALCULATION_STEP_MINUTES = 15.0;  // WRF coupling timestep [minutes]
+  
+  // Meteorological measurement heights [m]
+  constexpr int METEO_HEIGHT_METERS = 30;           // Height of meteorological measurements
+  constexpr int WIND_HEIGHT_METERS = 30;            // Height of wind measurements
+  
+  // Surface properties
+  constexpr double ROUGHNESS_LENGTH_METERS = 0.01;  // Surface roughness length [m]
+  constexpr double GEO_HEAT_FLUX = 0.06;            // Geothermal heat flux [W/m²]
+  constexpr int CANOPY_NONE = 0;                     // No canopy model
+  
+  // Temperature sanity checks [K] - prevents solver instabilities
+  constexpr double T_CRAZY_MAX_KELVIN = 400.0;      // Maximum reasonable temperature (127°C)
+  constexpr double T_CRAZY_MIN_KELVIN = 100.0;      // Minimum reasonable temperature (-173°C)
+  
+  // Water vapor transport settings
+  constexpr int VAPOR_TRANSPORT_TIMESTEP_SEC = 60;  // Vapor transport sub-timestep [seconds]
+  constexpr double VAPOR_IMPLICIT_FACTOR = 1.0;     // Fully implicit solver (most stable)
+}
+
 // Initialize SNOWPACK configuration
 void initialize_snowpack_config() {
   if (config_initialized) return;
@@ -34,21 +58,21 @@ void initialize_snowpack_config() {
 
   // SNOWPACK configuration matching CRYOWRF exactly
   // [Snowpack] section - core settings
-  base_config.addKey("CALCULATION_STEP_LENGTH", "Snowpack", "15.0");  // 15 minutes like CRYOWRF
+  base_config.addKey("CALCULATION_STEP_LENGTH", "Snowpack", std::to_string(SnowpackConstants::CALCULATION_STEP_MINUTES));
   base_config.addKey("MEAS_TSS", "Snowpack", "FALSE");
   base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "FALSE");
   base_config.addKey("SW_MODE", "Snowpack", "INCOMING");
   base_config.addKey("INCOMING_LONGWAVE", "Snowpack", "TRUE");
-  base_config.addKey("HEIGHT_OF_WIND_VALUE", "Snowpack", "30");
-  base_config.addKey("HEIGHT_OF_METEO_VALUES", "Snowpack", "30");
+  base_config.addKey("HEIGHT_OF_WIND_VALUE", "Snowpack", std::to_string(SnowpackConstants::WIND_HEIGHT_METERS));
+  base_config.addKey("HEIGHT_OF_METEO_VALUES", "Snowpack", std::to_string(SnowpackConstants::METEO_HEIGHT_METERS));
   base_config.addKey("ATMOSPHERIC_STABILITY", "Snowpack", "MO_HOLTSLAG");
-  base_config.addKey("ROUGHNESS_LENGTH", "Snowpack", "0.01");
+  base_config.addKey("ROUGHNESS_LENGTH", "Snowpack", std::to_string(SnowpackConstants::ROUGHNESS_LENGTH_METERS));
   base_config.addKey("NUMBER_SLOPES", "Snowpack", "1");
   base_config.addKey("CHANGE_BC", "Snowpack", "FALSE");
   base_config.addKey("SNP_SOIL", "Snowpack", "FALSE");
   base_config.addKey("SOIL_FLUX", "Snowpack", "TRUE");
-  base_config.addKey("GEO_HEAT", "Snowpack", "0.06");
-  base_config.addKey("CANOPY", "Snowpack", "0");
+  base_config.addKey("GEO_HEAT", "Snowpack", std::to_string(SnowpackConstants::GEO_HEAT_FLUX));
+  base_config.addKey("CANOPY", "Snowpack", std::to_string(SnowpackConstants::CANOPY_NONE));
   base_config.addKey("FORCING", "Snowpack", "ATMOS");
   
   // [SnowpackAdvanced] section - advanced settings
@@ -64,12 +88,12 @@ void initialize_snowpack_config() {
   base_config.addKey("WATERTRANSPORTMODEL_SOIL", "SnowpackAdvanced", "RICHARDSEQUATION");
   base_config.addKey("ENABLE_VAPOUR_TRANSPORT", "SnowpackAdvanced", "FALSE");
   base_config.addKey("ENABLE_VAPOUR_TRANSPORT_SOIL", "SnowpackAdvanced", "FALSE");
-  base_config.addKey("WATER_VAPOR_TRANSPORT_TIMESTEP", "SnowpackAdvanced", "60");
-  base_config.addKey("WATER_VAPOR_TRANSPORT_IMPLICIT_FACTOR", "SnowpackAdvanced", "1.0");
+  base_config.addKey("WATER_VAPOR_TRANSPORT_TIMESTEP", "SnowpackAdvanced", std::to_string(SnowpackConstants::VAPOR_TRANSPORT_TIMESTEP_SEC));
+  base_config.addKey("WATER_VAPOR_TRANSPORT_IMPLICIT_FACTOR", "SnowpackAdvanced", std::to_string(SnowpackConstants::VAPOR_IMPLICIT_FACTOR));
   base_config.addKey("MEAS_INCOMING_LONGWAVE", "SnowpackAdvanced", "TRUE");
   base_config.addKey("FORCE_ADD_SNOWFALL", "SnowpackAdvanced", "FALSE");
-  base_config.addKey("T_CRAZY_MAX", "SnowpackAdvanced", "400.0");
-  base_config.addKey("T_CRAZY_MIN", "SnowpackAdvanced", "100.0");
+  base_config.addKey("T_CRAZY_MAX", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MAX_KELVIN));
+  base_config.addKey("T_CRAZY_MIN", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MIN_KELVIN));
 
   global_config = std::make_unique<SnowpackConfig>(base_config);
   config_initialized = true;
