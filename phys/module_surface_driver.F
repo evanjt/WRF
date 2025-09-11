@@ -4360,7 +4360,7 @@ CONTAINS
 
          CALL wrf_debug(100,'in SNOWPACK LSM')
          
-         ! Call SNOWPACK driver - CRYOWRF-compatible interface  
+         ! Call SNOWPACK driver with simple interface - CRYOWRF arrays handled via Registry
          CALL snowpacklsm(itimestep,xlat,xlong,dz8w,dt,dx,               &
                ivgtyp,   isltyp,    xland,     xice,xice_threshold,       &
                t_phy,     qv_curr,     u_phy,    v_phy,   swdown,   glw,  &

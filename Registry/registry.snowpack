@@ -2,6 +2,10 @@
 # Clean interface without blowing snow complexity
 # Based on essential meteorological and snow physics variables only
 
+# Dimension for snow layers (simplified from CRYOWRF - no blowing snow layers)
+rconfig   integer no_snpack_lay_to_sav    namelist,physics      1            50      irh    "no_snpack_lay_to_sav"          ""      "" 
+dimspec    snpacky 2     namelist=no_snpack_lay_to_sav     z     snowpack_layers
+
 # Core SNOWPACK surface fluxes - replaces complex CRYOWRF outputs
 state    real   SNOWPACK_TSK      ij     misc        1         -     "SNOWPACK_TSK"      "SNOWPACK SURFACE TEMPERATURE"             "K"
 state    real   SNOWPACK_HFX      ij     misc        1         -     "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"  
@@ -28,5 +32,27 @@ state    real   SNOWPACK_SNOWH_TS ijkft   misc        1         -     "SNOWPACK_
 # Namelist parameters for SNOWPACK configuration
 rconfig   integer sf_snowpack_physics    namelist,physics   1            0       -      "sf_snowpack_physics"    "SNOWPACK LAND SURFACE OPTION"
 
+# CRYOWRF-compatible snow layer arrays (without blowing snow complexity)
+state   real    sn_T     i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_T"      "snowpack layer temperature" "K"
+state   real    sn_thick i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_thick"  "snowpack layer thickness" "m"
+state   real    sn_volI  i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_volI"   "Ice volume fraction" "%"
+state   real    sn_volW  i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_volW"   "water volume fraction" "%"
+state   real    sn_volV  i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_volV"   "air volume fraction" "%"
+state   real    sn_rg    i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_rg"     "grain radius" "mm"
+state   real    sn_rb    i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_rb"     "bond radius" "mm"
+state   real    sn_dd    i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_dd"     "dendricity" "-"
+state   real    sn_sp    i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_sp"     "sphericity" "-"
+state   integer sn_nlayers ij          misc         1         -     rhd=(interp_fcni)       "sn_nlayers" "number of snowpack layers" "-"
+
+# CRYOWRF-compatible mass budget arrays (simplified - no erosion/deposition from blowing snow)
+state   real    m_budg_precip  ij      misc         1         -     i012rhd    "M_BUDG_PREC"  "Mass Budget Precip" "kg m-2"
+state   real    m_budg_sublim  ij      misc         1         -     i012rhd    "M_BUDG_SUBL"  "Mass Budget Sublim" "kg m-2"
+state   real    m_budg_melt    ij      misc         1         -     i012rhd    "M_BUDG_MELT"  "Mass Budget melt" "kg m-2"
+
+# CRYOWRF-compatible energy budget arrays (essential fluxes only)
+state   real    e_budg_lw_in   ij      misc         1         -     i012rhd    "E_BUDG_LWIN"   "Energy Budget LW IN" "W m-2"
+state   real    e_budg_sensible ij     misc         1         -     i012rhd    "E_BUDG_SENS"   "Energy Budget Sensible" "W m-2"
+state   real    e_budg_latent  ij      misc         1         -     i012rhd    "E_BUDG_LATENT" "Energy Budget Latent" "W m-2"
+
 # Package declaration
-package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow
+package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow,sn_T,sn_thick,sn_volI,sn_volW,sn_volV,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers,m_budg_precip,m_budg_sublim,m_budg_melt,e_budg_lw_in,e_budg_sensible,e_budg_latent

@@ -19,13 +19,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
                ids,ide,  jds,jde,  kds,kde,                    &
                ims,ime,  jms,jme,  kms,kme,                    &
-               its,ite,  jts,jte,  kts,kte,                    &
-               ! Optional CRYOWRF snow layer arrays
-               sn_T, sn_thick, sn_volI, sn_volW, sn_volV,     &  ! Snow layer properties
-               sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers,        &  ! Grain properties + layer count
-               ! Optional CRYOWRF budget arrays  
-               m_budg_precip, m_budg_sublim, m_budg_melt,      &  ! Mass budgets
-               e_budg_lw_in, e_budg_sensible, e_budg_latent    )  ! Energy budgets
+               its,ite,  jts,jte,  kts,kte     )
 !-------------------------------------------------------------------
     USE module_sf_snowpack
     IMPLICIT NONE
@@ -86,16 +80,6 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     INTEGER, INTENT(IN   )   ::     ims,ime, jms,jme, kms,kme
     INTEGER, INTENT(IN   )   ::     its,ite, jts,jte, kts,kte
 
-! CRYOWRF snow layer arrays (max 50 snow layers)
-    INTEGER, PARAMETER :: max_snow_layers = 50
-    REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_T, sn_thick
-    REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_volI, sn_volW, sn_volV  
-    REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_rg, sn_rb, sn_dd, sn_sp
-    INTEGER, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: sn_nlayers
-    
-    REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: m_budg_precip, m_budg_sublim, m_budg_melt
-    REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: e_budg_lw_in, e_budg_sensible, e_budg_latent
-
 ! Local Variables
     INTEGER :: I, J
 
@@ -108,16 +92,13 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         CALL wrf_message('*** SNOWPACK LSM ACTIVATED: Running modern SNOWPACK physics ***')
     END IF
 
+    ! Call basic SNOWPACK driver - CRYOWRF arrays will come from Registry later
     CALL snowpack_driver( &
         itimestep, dt, &
         t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &   ! Atmospheric state
         swdown, glw, rainbl, &                        ! Forcing  
         tsk, hfx, qfx, lh, albedo, snowc, &           ! Surface fluxes
         snow, snowh, qsfc, &                          ! Snow states
-        sn_T, sn_thick, sn_volI, sn_volW, sn_volV, &  ! Snow layer arrays
-        sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers, &     ! Grain properties
-        m_budg_precip, m_budg_sublim, m_budg_melt, &   ! Mass budgets
-        e_budg_lw_in, e_budg_sensible, e_budg_latent, & ! Energy budgets
         ids,ide, jds,jde, kds,kde, &                  ! Dimensions  
         ims,ime, jms,jme, kms,kme, &
         its,ite, jts,jte, kts,kte )
