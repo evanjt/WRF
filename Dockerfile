@@ -201,6 +201,7 @@ FROM wrf-source AS wrf-build-attempt
 RUN cd ${BASE_DIR}/WRF && \
     export JASPER=$DIR/grib2 && \
     export JASPER_ROOT=$DIR/grib2 && \
+    ./clean -a && \
     printf "${WRF_CONFIGURE_OPTION}\n1\n" | ./configure && \
     ./compile em_real -j 20
 
