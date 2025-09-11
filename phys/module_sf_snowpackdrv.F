@@ -17,11 +17,17 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
                ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
+               ! CRYOWRF arrays for detailed diagnostics
+               SN_T,     SN_THICK,  SN_VOLI,   SN_VOLW,   SN_VOLV,      & ! CRYOWRF layer arrays
+               SN_RG,    SN_RB,     SN_DD,     SN_SP,     SN_NLAYERS,   & ! CRYOWRF layer arrays
+               M_BUDG_PRECIP, M_BUDG_SUBLIM, M_BUDG_MELT,              & ! CRYOWRF mass budgets
+               E_BUDG_LW_IN, E_BUDG_SENSIBLE, E_BUDG_LATENT,           & ! CRYOWRF energy budgets
                ids,ide,  jds,jde,  kds,kde,                    &
                ims,ime,  jms,jme,  kms,kme,                    &
                its,ite,  jts,jte,  kts,kte     )
 !-------------------------------------------------------------------
     USE module_sf_snowpack
+    USE module_snowpack_types
     IMPLICIT NONE
 !-------------------------------------------------------------------
 
@@ -76,64 +82,123 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  Z0        ! combined z0 sent to coupled model
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ZNT       ! thermal roughness length
 
+! CRYOWRF arrays (from WRF Registry)
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_T      ! Layer temperatures [K]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_THICK  ! Layer thickness [m]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLI   ! Ice volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLW   ! Water volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLV   ! Air volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_RG     ! Grain radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_RB     ! Bond radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_DD     ! Dendricity [-]
+    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_SP     ! Sphericity [-]
+    INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  SN_NLAYERS ! Number of layers [-]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_PRECIP   ! Mass budget precip [kg/m²]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_SUBLIM   ! Mass budget sublim [kg/m²]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_MELT     ! Mass budget melt [kg/m²]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_LW_IN    ! Energy budget LW [W/m²]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_SENSIBLE ! Energy budget sensible [W/m²]
+    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_LATENT   ! Energy budget latent [W/m²]
+
     INTEGER, INTENT(IN   )   ::     ids,ide, jds,jde, kds,kde
     INTEGER, INTENT(IN   )   ::     ims,ime, jms,jme, kms,kme
     INTEGER, INTENT(IN   )   ::     its,ite, jts,jte, kts,kte
 
 ! Local Variables
-    INTEGER :: I, J
+    INTEGER :: I, J, K
+    TYPE(SnowpackInterface) :: interface_data
 
 !-------------------------------------------------------------------
-!  Call SNOWPACK physics - this replaces the entire CRYOWRF coupling system
+!  Call SNOWPACK physics with CRYOWRF array integration
 !-------------------------------------------------------------------
 
-    ! Diagnostic message to confirm SNOWPACK LSM is active
+    ! Diagnostic message
     IF (itimestep == 1) THEN
-        CALL wrf_message('*** SNOWPACK LSM ACTIVATED: Running modern SNOWPACK physics ***')
+        CALL wrf_message('*** SNOWPACK LSM: CRYOWRF array integration active ***')
     END IF
 
-    ! Call basic SNOWPACK driver - CRYOWRF arrays will come from Registry later
-    CALL snowpack_driver( &
-        itimestep, dt, &
-        t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &   ! Atmospheric state
-        swdown, glw, rainbl, &                        ! Forcing  
-        tsk, hfx, qfx, lh, albedo, snowc, &           ! Surface fluxes
-        snow, snowh, qsfc, &                          ! Snow states
-        ids,ide, jds,jde, kds,kde, &                  ! Dimensions  
-        ims,ime, jms,jme, kms,kme, &
-        its,ite, jts,jte, kts,kte )
-
-    ! Set some standard LSM outputs that SNOWPACK doesn't directly provide
+    ! Grid loop with structured data approach
     DO J = jts,jte
     DO I = its,ite
         ! Skip water points
         IF((XLAND(I,J)-1.5) >= 0.) CYCLE
         
-        ! Rough approximations for variables SNOWPACK doesn't compute
-        GRDFLX(I,J) = 0.06  ! Geothermal heat flux [W/m2] - typical value
-        SMSTAV(I,J) = 1.0   ! Soil moisture availability - assume available
-        SMSTOT(I,J) = 100.0 ! Total soil water [mm] - placeholder
+        ! Initialize interface structure
+        CALL initialize_snowpack_interface(interface_data, itimestep, dt, dx)
+        
+        ! Pack WRF data into structured interface
+        CALL pack_wrf_to_interface(interface_data, &
+            ! Atmospheric inputs
+            T_PHY(I,1,J), QV_CURR(I,1,J), U_PHY(I,1,J), V_PHY(I,1,J), P8W(I,1,J), &
+            SWDOWN(I,J), GLW(I,J), RAINBL(I,J), &
+            ! Grid information  
+            XLAT(I,J), XLONG(I,J), DZ8W(I,1,J), &
+            ! Surface state (input/output)
+            TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
+            SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J), &
+            ! Grid indices
+            I, J, 1)
+        
+        ! Call SNOWPACK physics with structured interface
+        CALL snowpack_physics_structured(interface_data)
+        
+        ! Unpack results back to WRF variables
+        CALL unpack_interface_to_wrf(interface_data, &
+            TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
+            SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J))
+        
+        ! Populate CRYOWRF layer arrays
+        SN_NLAYERS(I,J) = interface_data%layers%n_layers
+        DO K = 1, interface_data%layers%n_layers
+            SN_T(I,K,J) = interface_data%layers%layer_temp(K)
+            SN_THICK(I,K,J) = interface_data%layers%layer_thick(K)
+            SN_VOLI(I,K,J) = interface_data%layers%vol_ice(K)
+            SN_VOLW(I,K,J) = interface_data%layers%vol_water(K)
+            SN_VOLV(I,K,J) = interface_data%layers%vol_air(K)
+            SN_RG(I,K,J) = interface_data%layers%grain_radius(K)
+            SN_RB(I,K,J) = interface_data%layers%bond_radius(K)
+            SN_DD(I,K,J) = interface_data%layers%dendricity(K)
+            SN_SP(I,K,J) = interface_data%layers%sphericity(K)
+        END DO
+        
+        ! Clear unused layers
+        DO K = interface_data%layers%n_layers + 1, 50
+            SN_T(I,K,J) = 0.0
+            SN_THICK(I,K,J) = 0.0
+            SN_VOLI(I,K,J) = 0.0
+            SN_VOLW(I,K,J) = 0.0
+            SN_VOLV(I,K,J) = 0.0
+            SN_RG(I,K,J) = 0.0
+            SN_RB(I,K,J) = 0.0
+            SN_DD(I,K,J) = 0.0
+            SN_SP(I,K,J) = 0.0
+        END DO
+        
+        ! Populate CRYOWRF budget arrays
+        M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip
+        M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim
+        M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt
+        E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in
+        E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible
+        E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent
+        
+        ! Update accumulated variables from budget tracking
+        ACSNOM(I,J) = interface_data%budgets%accum_snowmelt
+        ACSNOW(I,J) = interface_data%budgets%accum_snowfall
+        
+        ! Set standard LSM outputs
+        GRDFLX(I,J) = 0.06     ! Geothermal heat flux [W/m2]
+        SMSTAV(I,J) = 1.0      ! Soil moisture availability
+        SMSTOT(I,J) = 100.0    ! Total soil water [mm]
         SFCRUNOFF(I,J) = SFCRUNOFF(I,J) + 0.0  ! No surface runoff from SNOWPACK yet
         UDRUNOFF(I,J) = UDRUNOFF(I,J) + 0.0    ! No subsurface runoff from SNOWPACK yet
-        CANWAT(I,J) = 0.0   ! No canopy water in basic SNOWPACK
-        EMISS(I,J) = 0.98   ! Standard snow/soil emissivity
-        Z0(I,J) = 0.001     ! Roughness length [m] - typical for snow
-        ZNT(I,J) = Z0(I,J)  ! Thermal roughness = momentum roughness
-        
-        ! Accumulate snowfall and melt (simplified)
-        IF(RAINBL(I,J) > 0.0 .AND. T_PHY(I,1,J) < 273.15) THEN
-            ACSNOW(I,J) = ACSNOW(I,J) + RAINBL(I,J) * DT
-        END IF
-        
-        ! Simple snow melt accumulation
-        IF(SNOWH(I,J) < 0.001 .AND. TSK(I,J) > 273.15) THEN
-            ACSNOM(I,J) = ACSNOM(I,J) + MAX(0.0, (TSK(I,J) - 273.15) * 0.1 * DT)
-        END IF
+        CANWAT(I,J) = 0.0      ! No canopy water in SNOWPACK
+        EMISS(I,J) = 0.98      ! Standard snow/soil emissivity
         
         ! Set soil properties (simplified - SNOWPACK handles snow layers)
-        SMOIS(I,1,J) = 0.3  ! Volumetric soil moisture - placeholder
-        SH2O(I,1,J) = 0.3   ! Liquid soil moisture - placeholder  
-        TSLB(I,1,J) = TSK(I,J)  ! Soil temperature = surface temperature (simplified)
+        SMOIS(I,1,J) = 0.3  ! Volumetric soil moisture
+        SH2O(I,1,J) = 0.3   ! Liquid soil moisture
+        TSLB(I,1,J) = TSK(I,J)  ! Soil temperature = surface temperature
         
     END DO
     END DO
