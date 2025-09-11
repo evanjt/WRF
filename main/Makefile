@@ -14,7 +14,7 @@ include ../configure.wrf
 
 $(SOLVER)_wrf : wrf.o ../main/module_wrf_top.o
 	$(RANLIB) $(RLFLAGS) $(LIBWRFLIB)
-	$(LD) -o wrf.exe $(LDFLAGS) wrf.o ../main/module_wrf_top.o $(LIBWRFLIB) $(CMAQLIB) $(LIB) -lstdc++ 
+	$(LD) -o wrf.exe $(LDFLAGS) wrf.o ../main/module_wrf_top.o $(LIBWRFLIB) $(CMAQLIB) $(LIB) -lstdc++ -L../phys/snowpack/snowpack/lib -lsnowpack -L../phys/snowpack/meteoio/lib -lmeteoio 
 
 $(SOLVER)_wrfplus : wrf.o ../main/module_wrf_top.o
 	$(RANLIB) $(RLFLAGS) $(LIBWRFLIB)

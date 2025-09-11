@@ -286,23 +286,20 @@ submodules :
 	else \
 		echo No action required for MYNN-EDMF submodule ; \
 	fi
-	@if [ \( ! -f module_sf_snowpackdrv.F \) -o \( ! -f module_sf_snowpack.F \) -o \( ! -f snowpack_wrf_bridge.cpp \) ] ; then \
+	@if [ ! -d snowpack/meteoio/build ] ; then \
 		echo Initializing SNOWPACK submodules ; \
 		( cd .. ; git submodule update --init --recursive ) ; \
-		ln -sf snowpack/coupler/module_sf_snowpackdrv.F . ; \
-		ln -sf snowpack/coupler/module_sf_snowpack.F . ; \
-		ln -sf snowpack/coupler/snowpack_wrf_bridge.cpp . ; \
 		echo Building MeteoIO library ; \
 		( cd snowpack/meteoio && mkdir -p build && cd build && cmake .. && make -j 4 ) ; \
 		echo Building SNOWPACK library ; \
 		( cd snowpack/snowpack && mkdir -p build && cd build && cmake .. -DMETEOIO_ROOT=../../meteoio/build && make -j 4 ) ; \
 	else \
-		echo No action required for SNOWPACK submodules ; \
+		echo SNOWPACK libraries already built ; \
 	fi
 
 # C++ object compilation for SNOWPACK interface
-snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp
-	$(CXX) -c $(CXXFLAGS) -fPIC -o $@ $<
+snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp submodules
+	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
 	
 clean:
 	@ echo 'use the clean script'
