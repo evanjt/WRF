@@ -65,7 +65,7 @@ CC_TOOLS_CFLAGS = CONFIGURE_NMM_CORE
 SNOWPACK        = 1
 
 ifeq ($(SNOWPACK), 1)
-SNOWPACK_LIB    = $(WRF_SRC_ROOT_DIR)/phys/snowpack/snowpack/lib/libsnowpack.so $(WRF_SRC_ROOT_DIR)/phys/snowpack/meteoio/lib/libmeteoio.so
+SNOWPACK_LIB    = -L../phys/snowpack/snowpack/lib -lsnowpack -L../phys/snowpack/meteoio/lib -lmeteoio -lm -ldl -Wl,-rpath,../phys/snowpack/snowpack/lib -Wl,-rpath,../phys/snowpack/meteoio/lib
 else
 SNOWPACK_LIB    = 
 endif
