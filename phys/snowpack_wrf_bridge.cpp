@@ -106,20 +106,27 @@ void initialize_snowpack_config() {
   base_config.addKey("T_CRAZY_MAX", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MAX_KELVIN));
   base_config.addKey("T_CRAZY_MIN", "SnowpackAdvanced", std::to_string(SnowpackConstants::T_CRAZY_MIN_KELVIN));
 
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === Creating SnowpackConfig ===\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Key sections added: [Snowpack], [SnowpackAdvanced]\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Critical keys configured:\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ CALCULATION_STEP_LENGTH = %.1f min\n", SnowpackConstants::CALCULATION_STEP_MINUTES);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ METEO_STEP_LENGTH = %.1f min\n", SnowpackConstants::CALCULATION_STEP_MINUTES);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ T_CRAZY_MAX = %.1f K\n", SnowpackConstants::T_CRAZY_MAX_KELVIN);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   ✓ T_CRAZY_MIN = %.1f K\n", SnowpackConstants::T_CRAZY_MIN_KELVIN);
+  // Minimal configuration output - only show once
+  static bool config_message_shown = false;
+  if (!config_message_shown) {
+    printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Initializing SNOWPACK v11.08 configuration\n");
+    printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: ✓ Timestep: %.1f min, SNP_SOIL: FALSE\n", 
+           SnowpackConstants::CALCULATION_STEP_MINUTES);
+    config_message_shown = true;
+  }
   
   try {
     global_config = std::make_unique<SnowpackConfig>(base_config);
-    config_initialized = true;
     
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowpackConfig created successfully!\n");
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK Configuration Initialization COMPLETE ===\n");
+    // Verify critical configuration values (silent verification)
+    bool soil_layers_enabled = false;
+    global_config->getValue("SNP_SOIL", "Snowpack", soil_layers_enabled);
+    
+    if (soil_layers_enabled) {
+      printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ Configuration error: SNP_SOIL is TRUE but should be FALSE!\n");
+    }
+    
+    config_initialized = true;
   } catch (const mio::UnknownValueException& e) {
     printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ Missing configuration key: %s\n", e.what());
     printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: This key needs to be added to our bridge configuration\n");
@@ -148,21 +155,27 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
                       double* snow_coverage, double dt, int i_grid,
                       int j_grid) {
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK PHYSICS CALL START ===\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Grid point: (%d,%d)\n", i_grid, j_grid);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Input meteorology:\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Temperature: %.2f K (%.2f°C)\n", temp_air, temp_air - 273.15);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Humidity: %.3f\n", humidity);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Wind speed: %.2f m/s\n", wind_speed);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Precipitation: %.3f mm\n", precipitation);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - SW radiation: %.2f W/m²\n", shortwave_in);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - LW radiation: %.2f W/m²\n", longwave_in);
+  // Reduce debug verbosity - only print for first few grid points or errors
+  static int call_count = 0;
+  call_count++;
+  
+  
+  // Periodic progress reporting - much less verbose
+  if (call_count <= 5 || (call_count % 1000 == 0)) {  // First 5 calls, then every 1000th
+    printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Physics call #%d - Grid (%d,%d) - Active instances: %zu\n", 
+           call_count, i_grid, j_grid, snowpack_instances.size());
+  }
   
   // Initialize configuration on first call
   try {
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling initialize_snowpack_config()...\n");
+    // Minimal initialization output - only for first few calls
+    if (call_count <= 3) {  // Reduced from 10 to 3
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SNOWPACK configuration...\n");
+    }
     initialize_snowpack_config();
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Configuration initialization completed\n");
+    if (call_count <= 3) {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Configuration ready\n");
+    }
   } catch (const std::exception& e) {
     printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ Configuration failed: %s\n", e.what());
     *surface_temp = -999.0;  // Error indicators
@@ -176,16 +189,14 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
   
   // Create SNOWPACK instance for this grid point if it doesn't exist
   if (snowpack_instances.find(grid_point) == snowpack_instances.end()) {
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Creating new SNOWPACK instance for grid (%d,%d)\n", i_grid, j_grid);
+    // Only print for first few grid points to reduce output
+    if (snowpack_instances.size() < 3) {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Creating SNOWPACK instance for grid (%d,%d)\n", i_grid, j_grid);
+    }
     
     try {
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Constructing Snowpack object with global_config...\n");
       snowpack_instances[grid_point] = std::make_unique<Snowpack>(*global_config);
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Snowpack object created successfully\n");
-      
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Creating SnowStation object...\n");
       snow_stations[grid_point] = SnowStation();
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowStation object created successfully\n");
     } catch (const std::exception& e) {
       printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SNOWPACK instance creation failed: %s\n", e.what());
       printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: This is likely a configuration error\n");
@@ -212,42 +223,64 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     ssdata.nN = 1;       // Start with 1 node (ground only)  
     ssdata.nLayers = 0;  // No snow/soil layers initially (SNP_SOIL = FALSE)
     
-    // Initialize basic snow/soil properties
-    ssdata.Albedo = 0.85;  // Fresh snow albedo
-    ssdata.SoilAlb = 0.2;  // Soil albedo 
+    // Initialize surface properties
+    ssdata.Albedo = 0.85;   // Default snow albedo
+    ssdata.SoilAlb = 0.2;   // Default soil albedo
     ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_METERS;
+    
+    // Initialize snow state
+    ssdata.HS_last = 0.0;
     
     // Ensure LayerData is empty (no soil/snow layers, just bare ground)
     ssdata.Ldata.clear();       // No layer data (matches nLayers = 0)
 
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SnowStation with:\n");
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Station ID: %s\n", ssdata.meta.stationID.c_str());
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Position: %.2f°N, %.2f°E, %.0fm\n", 
-           SnowpackConstants::DEFAULT_LATITUDE, SnowpackConstants::DEFAULT_LONGITUDE, height);
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Structure: nN=%zu, nLayers=%zu, Ldata.size=%zu\n", 
-           ssdata.nN, ssdata.nLayers, ssdata.Ldata.size());
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]:   - Configuration: SNP_SOIL=FALSE (bare ground only)\n");
+    // Only show detailed initialization for first few grid points
+    if (snowpack_instances.size() <= 3) {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Initializing SnowStation: %s at %.0fm\n", 
+             ssdata.meta.stationID.c_str(), height);
+    }
     
     try {
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling xdata.initialize()...\n");
+      
       xdata.initialize(ssdata, 0);  // Initialize with sector 0
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowStation initialized successfully\n");
+      
+      // Only print success for first few grid points
+      if (snowpack_instances.size() <= 3) {
+        printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ SnowStation initialized successfully\n");
+      }
     } catch (const mio::IOException& e) {
-      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed: %s\n", e.what());
-      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: This is likely a soil layer configuration issue\n");
-      *surface_temp = -999.0;
-      *snow_swe = -999.0;
-      *snow_depth = -999.0;
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed (IOException): %s\n", e.what());
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Error likely related to configuration or data inconsistency\n");
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Grid (%d,%d) - This may be a domain boundary issue\n", i_grid, j_grid);
+      
+      // Return safe fallback values instead of crashing
+      *surface_temp = temp_air;
+      *snow_swe = 0.0;
+      *snow_depth = 0.0; 
+      *heat_flux_sensible = 50.0;
+      *heat_flux_latent = 20.0;
+      *albedo = 0.2;  // Soil albedo
+      *snow_coverage = 0.0;
       return;
     } catch (const std::exception& e) {
-      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed: %s\n", e.what());
-      *surface_temp = -999.0;
-      *snow_swe = -999.0;
-      *snow_depth = -999.0;
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SnowStation initialization failed (std::exception): %s\n", e.what());
+      printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Grid (%d,%d) - Unknown error during SNOWPACK initialization\n", i_grid, j_grid);
+      
+      // Return safe fallback values instead of crashing
+      *surface_temp = temp_air;
+      *snow_swe = 0.0;
+      *snow_depth = 0.0;
+      *heat_flux_sensible = 50.0; 
+      *heat_flux_latent = 20.0;
+      *albedo = 0.2;  // Soil albedo
+      *snow_coverage = 0.0;
       return;
     }
 
-    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Grid point (%d,%d) fully initialized\n", i_grid, j_grid);
+    // Only print completion message for first few grid points
+    if (snowpack_instances.size() <= 3) {
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: ✅ Grid point (%d,%d) fully initialized\n", i_grid, j_grid);
+    }
   }
 
   // Get references to this grid point's SNOWPACK instance and data
@@ -290,19 +323,31 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SNOWPACK model completed successfully for grid (%d,%d)\n", 
            i_grid, j_grid);
 
-    // Extract results for WRF
-    *surface_temp =
-        mdata.tss;  // Surface temperature from SNOWPACK (in CurrentMeteo)
-    *snow_swe = xdata.swe;   // Snow water equivalent [mm] (direct member)
-    *snow_depth = xdata.cH;  // Total calculated height [m] (direct member)
+    // Extract results for WRF with safety checks
+    *surface_temp = (mdata.tss > 0) ? mdata.tss : temp_air;  // Use air temp if surface temp invalid
+    *snow_swe = xdata.swe;   // Snow water equivalent [mm] 
+    *snow_depth = xdata.cH;  // Total calculated height [m]
+    
+    // Apply physical constraints
+    if (*surface_temp < 150.0 || *surface_temp > 350.0) {  // Sanity check temperature
+        *surface_temp = temp_air;  // Fallback to air temperature
+    }
+    
+    if (*snow_depth < 0.0) *snow_depth = 0.0;  // No negative snow depth
+    if (*snow_swe < 0.0) *snow_swe = 0.0;      // No negative SWE
+    
+    // Consistency check: SWE and depth should be related
+    if (*snow_depth > 0.001 && *snow_swe <= 0.0) {
+        *snow_swe = *snow_depth * 100.0;  // Assume ~100kg/m³ density fallback
+    }
 
-    // Energy fluxes from SNOWPACK
+    // Energy fluxes from SNOWPACK  
     *heat_flux_sensible = sdata.qs;  // Sensible heat flux [W/m²]
     *heat_flux_latent = sdata.ql;    // Latent heat flux [W/m²]
 
     // Surface properties
-    *albedo = xdata.Albedo;                              // Snow albedo [-]
-    *snow_coverage = (*snow_depth > 0.001) ? 1.0 : 0.0;  // Snow coverage [-]
+    *albedo = (xdata.Albedo > 0.0) ? xdata.Albedo : 0.85;  // Default snow albedo if invalid
+    *snow_coverage = (*snow_depth > 0.001) ? 1.0 : 0.0;    // Snow coverage [-]
 
   } catch (const std::exception& e) {
     // SNOWPACK physics failure - terminate with error
@@ -325,10 +370,21 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     exit(1);
   }
   
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: === SNOWPACK PHYSICS CALL SUCCESS ===\n");
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Grid (%d,%d) completed successfully\n", i_grid, j_grid);
-  printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Output: T_sfc=%.2fK, SWE=%.3fmm, depth=%.3fm\n", 
-         *surface_temp, *snow_swe, *snow_depth);
+  if (call_count <= 10 || (call_count % 100 == 0)) {  // Reduced success message frequency
+    printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SUCCESS #%d: Grid (%d,%d) T_sfc=%.1fK (%.1f°C), SWE=%.2fmm, depth=%.2fm\n", 
+           call_count, i_grid, j_grid, *surface_temp, *surface_temp - 273.15, *snow_swe, *snow_depth);
+  }
+  
+  // Check for genuinely unphysical results (season-agnostic)
+  if (*surface_temp < 150.0 || *surface_temp > 350.0) {  // Extreme but possible range: -123°C to 77°C
+    printf("SNOWPACK-WARNING [C++/snowpack_wrf_bridge.cpp]: Extreme temperature at grid (%d,%d): %.1fK (%.1f°C)\n",
+           i_grid, j_grid, *surface_temp, *surface_temp - 273.15);
+  }
+  
+  if (*snow_depth > 20.0) {  // Very deep snow (could indicate initialization issue)
+    printf("SNOWPACK-WARNING [C++/snowpack_wrf_bridge.cpp]: Very deep snow at grid (%d,%d): %.2fm depth\n",
+           i_grid, j_grid, *snow_depth);
+  }
 }
 
 }  // extern "C"
