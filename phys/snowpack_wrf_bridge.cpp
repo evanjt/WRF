@@ -196,7 +196,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     
     try {
       snowpack_instances[grid_point] = std::make_unique<Snowpack>(*global_config);
-      snow_stations[grid_point] = SnowStation();
+      // Create SnowStation with explicit parameters: no canopy, no soil layers, no Alpine3D, no sea ice
+      snow_stations[grid_point] = SnowStation(false, false, false, false);
     } catch (const std::exception& e) {
       printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ SNOWPACK instance creation failed: %s\n", e.what());
       printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: This is likely a configuration error\n");
