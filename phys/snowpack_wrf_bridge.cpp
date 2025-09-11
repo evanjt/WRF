@@ -142,18 +142,17 @@ void initialize_snowpack_config() {
 // C interface for Fortran binding
 extern "C" {
 
-/*
- * Real SNOWPACK physics interface called from WRF
- * This function must match the BIND(C) interface in module_sf_snowpack.F
- */
-void snowpack_physics(double temp_air, double humidity, double wind_speed,
-                      double wind_dir, double shortwave_in, double longwave_in,
-                      double precipitation, double pressure, double height,
-                      double* snow_swe, double* snow_depth,
-                      double* surface_temp, double* heat_flux_sensible,
-                      double* heat_flux_latent, double* albedo,
-                      double* snow_coverage, double dt, int i_grid,
-                      int j_grid) {
+void snowpack_physics(double temp_air, double humidity, double wind_speed, double wind_dir,
+                      double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
+                      int i_grid, int j_grid,
+                      double* snow_swe, double* snow_depth, double* surface_temp,
+                      double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                      int* num_layers, double layer_temp[50], double layer_thick[50], 
+                      double layer_vol_ice[50], double layer_vol_water[50], double layer_vol_air[50],
+                      double layer_grain_radius[50], double layer_bond_radius[50], 
+                      double layer_dendricity[50], double layer_sphericity[50],
+                      double* mass_budg_precip, double* mass_budg_sublim, double* mass_budg_melt,
+                      double* energy_budg_lw_in, double* energy_budg_sensible, double* energy_budg_latent) {
   
   // Reduce debug verbosity - only print for first few grid points or errors
   static int call_count = 0;
@@ -386,6 +385,51 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed,
     printf("SNOWPACK-WARNING [C++/snowpack_wrf_bridge.cpp]: Very deep snow at grid (%d,%d): %.2fm depth\n",
            i_grid, j_grid, *snow_depth);
   }
+
+  // Extract snow layer data from SNOWPACK
+  *num_layers = 0;
+  for (int layer = 0; layer < 50; layer++) {
+    layer_temp[layer] = *surface_temp;
+    layer_thick[layer] = 0.0;
+    layer_vol_ice[layer] = 0.0;
+    layer_vol_water[layer] = 0.0;
+    layer_vol_air[layer] = 1.0;
+    layer_grain_radius[layer] = 0.0;
+    layer_bond_radius[layer] = 0.0;
+    layer_dendricity[layer] = 0.0;
+    layer_sphericity[layer] = 1.0;
+  }
+  
+  if (xdata.getNumberOfElements() > 0) {
+    *num_layers = std::min(static_cast<int>(xdata.getNumberOfElements()), 50);
+    
+    for (int layer = 0; layer < *num_layers; layer++) {
+      if (layer < static_cast<int>(xdata.Edata.size())) {
+        const ElementData& elem = xdata.Edata[layer];
+        layer_temp[layer] = elem.Te;
+        layer_thick[layer] = elem.L;
+        layer_vol_ice[layer] = elem.theta[ICE];
+        layer_vol_water[layer] = elem.theta[WATER];
+        layer_vol_air[layer] = elem.theta[AIR];
+        layer_grain_radius[layer] = elem.rg;
+        layer_bond_radius[layer] = elem.rb;
+        layer_dendricity[layer] = elem.dd;
+        layer_sphericity[layer] = elem.sp;
+      }
+    }
+  }
+
+  // Mass budgets
+  *mass_budg_precip = precipitation;
+  *mass_budg_sublim = sdata.mass[SurfaceFluxes::MS_SUBLIMATION];
+  *mass_budg_melt = sdata.mass[SurfaceFluxes::MS_SNOWPACK_RUNOFF];
+  
+  // Energy budgets
+  *energy_budg_lw_in = longwave_in;
+  *energy_budg_sensible = *heat_flux_sensible;
+  *energy_budg_latent = *heat_flux_latent;
+
 }
+
 
 }  // extern "C"

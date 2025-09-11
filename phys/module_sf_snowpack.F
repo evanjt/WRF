@@ -14,33 +14,31 @@
       INTERFACE
         SUBROUTINE snowpack_physics_c( &
             temp_air, humidity, wind_speed, wind_dir, &
-            shortwave_in, longwave_in, precipitation, pressure, height, &
+            shortwave_in, longwave_in, precipitation, pressure, height, dt, &
+            i_grid, j_grid, &
             snow_swe, snow_depth, surface_temp, &
             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
-            dt, i_grid, j_grid) BIND(C, name="snowpack_physics")
+            num_layers, layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
+            layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
+            mass_budg_precip, mass_budg_sublim, mass_budg_melt, &
+            energy_budg_lw_in, energy_budg_sensible, energy_budg_latent) BIND(C, name="snowpack_physics")
           
           USE, INTRINSIC :: iso_c_binding
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: humidity
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: wind_speed
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: wind_dir
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: longwave_in
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: precipitation
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: pressure
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: height
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: dt
-          INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid
-          INTEGER(C_INT), VALUE, INTENT(IN) :: j_grid
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
+          INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid, j_grid
           
-          REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe
-          REAL(C_DOUBLE), INTENT(INOUT) :: snow_depth
-          REAL(C_DOUBLE), INTENT(INOUT) :: surface_temp
+          REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
+          REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
           
-          REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible
-          REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_latent
-          REAL(C_DOUBLE), INTENT(OUT) :: albedo
-          REAL(C_DOUBLE), INTENT(OUT) :: snow_coverage
+          INTEGER(C_INT), INTENT(OUT) :: num_layers
+          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_temp, layer_thick
+          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_vol_ice, layer_vol_water, layer_vol_air
+          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_grain_radius, layer_bond_radius
+          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_dendricity, layer_sphericity
+          
+          REAL(C_DOUBLE), INTENT(OUT) :: mass_budg_precip, mass_budg_sublim, mass_budg_melt
+          REAL(C_DOUBLE), INTENT(OUT) :: energy_budg_lw_in, energy_budg_sensible, energy_budg_latent
           
         END SUBROUTINE snowpack_physics_c
       END INTERFACE
@@ -53,6 +51,10 @@
         swdown, glw, rainbl, &
         tsk, hfx, qfx, lh, albedo, snowc, &
         snow, snowh, qsfc, &
+        sn_T, sn_thick, sn_volI, sn_volW, sn_volV, &
+        sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers, &
+        m_budg_precip, m_budg_sublim, m_budg_melt, &
+        e_budg_lw_in, e_budg_sensible, e_budg_latent, &
         ids,ide, jds,jde, kds,kde, &
         ims,ime, jms,jme, kms,kme, &
         its,ite, jts,jte, kts,kte )
@@ -83,17 +85,34 @@
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: snowh
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: qsfc
 
+        INTEGER, PARAMETER :: max_snow_layers = 50
+        REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_T, sn_thick
+        REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_volI, sn_volW, sn_volV
+        REAL, DIMENSION(ims:ime, max_snow_layers, jms:jme), INTENT(INOUT) :: sn_rg, sn_rb, sn_dd, sn_sp
+        INTEGER, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: sn_nlayers
+        
+        REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: m_budg_precip, m_budg_sublim, m_budg_melt
+        REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: e_budg_lw_in, e_budg_sensible, e_budg_latent
+
         INTEGER, INTENT(IN) :: ids,ide, jds,jde, kds,kde
         INTEGER, INTENT(IN) :: ims,ime, jms,jme, kms,kme
         INTEGER, INTENT(IN) :: its,ite, jts,jte, kts,kte
 
-        INTEGER :: i, j
+        INTEGER :: i, j, k
         REAL :: z_ml, t_ml, q_ml, p_ml, u_ml, v_ml
         REAL :: wind_speed, wind_dir, rh, precip_rate
         REAL :: heat_sens, heat_lat, alb_out, snow_cov
         REAL :: es, qs
         REAL(C_DOUBLE) :: snow_swe_c, snow_depth_c, surface_temp_c
         REAL(C_DOUBLE) :: heat_sens_c, heat_lat_c, albedo_c, snow_cov_c
+        
+        INTEGER(C_INT) :: num_layers_c
+        REAL(C_DOUBLE), DIMENSION(50) :: layer_temp_c, layer_thick_c
+        REAL(C_DOUBLE), DIMENSION(50) :: layer_vol_ice_c, layer_vol_water_c, layer_vol_air_c
+        REAL(C_DOUBLE), DIMENSION(50) :: layer_grain_radius_c, layer_bond_radius_c
+        REAL(C_DOUBLE), DIMENSION(50) :: layer_dendricity_c, layer_sphericity_c
+        REAL(C_DOUBLE) :: mass_budg_precip_c, mass_budg_sublim_c, mass_budg_melt_c
+        REAL(C_DOUBLE) :: energy_budg_lw_in_c, energy_budg_sensible_c, energy_budg_latent_c
         
         REAL, PARAMETER :: svp1 = 0.6112, svp2 = 17.67
         REAL, PARAMETER :: svp3 = 29.65, svpt0 = 273.15, ep_2 = 0.622
@@ -139,9 +158,15 @@
         REAL(wind_speed, C_DOUBLE), REAL(wind_dir, C_DOUBLE), &
         REAL(swdown(i,j), C_DOUBLE), REAL(glw(i,j), C_DOUBLE), &
         REAL(precip_rate, C_DOUBLE), REAL(p_ml, C_DOUBLE), REAL(z_ml, C_DOUBLE), &
+        REAL(dt, C_DOUBLE), INT(i, C_INT), INT(j, C_INT), &
         snow_swe_c, snow_depth_c, surface_temp_c, &
         heat_sens_c, heat_lat_c, albedo_c, snow_cov_c, &
-        REAL(dt, C_DOUBLE), INT(i, C_INT), INT(j, C_INT))
+        num_layers_c, layer_temp_c, layer_thick_c, &
+        layer_vol_ice_c, layer_vol_water_c, layer_vol_air_c, &
+        layer_grain_radius_c, layer_bond_radius_c, &
+        layer_dendricity_c, layer_sphericity_c, &
+        mass_budg_precip_c, mass_budg_sublim_c, mass_budg_melt_c, &
+        energy_budg_lw_in_c, energy_budg_sensible_c, energy_budg_latent_c)
 
       ! Update WRF variables with SNOWPACK results
       snow(i,j)   = REAL(snow_swe_c)                ! Update SWE
@@ -152,6 +177,30 @@
       qfx(i,j)    = REAL(heat_lat_c) / 2.5e6        ! Moisture flux [kg/m2/s] (approx)
       albedo(i,j) = REAL(albedo_c)                  ! Surface albedo [0-1]
       snowc(i,j)  = REAL(snow_cov_c)                ! Snow coverage fraction [0-1]
+      
+      ! Update CRYOWRF snow layer arrays
+      sn_nlayers(i,j) = INT(num_layers_c)
+      DO k = 1, MIN(INT(num_layers_c), max_snow_layers)
+        sn_T(i,k,j) = REAL(layer_temp_c(k))
+        sn_thick(i,k,j) = REAL(layer_thick_c(k))
+        sn_volI(i,k,j) = REAL(layer_vol_ice_c(k))
+        sn_volW(i,k,j) = REAL(layer_vol_water_c(k))
+        sn_volV(i,k,j) = REAL(layer_vol_air_c(k))
+        sn_rg(i,k,j) = REAL(layer_grain_radius_c(k))
+        sn_rb(i,k,j) = REAL(layer_bond_radius_c(k))
+        sn_dd(i,k,j) = REAL(layer_dendricity_c(k))
+        sn_sp(i,k,j) = REAL(layer_sphericity_c(k))
+      END DO
+      
+      ! Update CRYOWRF mass budget arrays
+      m_budg_precip(i,j) = REAL(mass_budg_precip_c)
+      m_budg_sublim(i,j) = REAL(mass_budg_sublim_c)
+      m_budg_melt(i,j) = REAL(mass_budg_melt_c)
+      
+      ! Update CRYOWRF energy budget arrays
+      e_budg_lw_in(i,j) = REAL(energy_budg_lw_in_c)
+      e_budg_sensible(i,j) = REAL(energy_budg_sensible_c)
+      e_budg_latent(i,j) = REAL(energy_budg_latent_c)
 
     END DO JLOOP
     END DO ILOOP
