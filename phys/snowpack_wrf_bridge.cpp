@@ -368,7 +368,7 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     
     // Extract mass budget information from SurfaceFluxes
     *mass_precip = surfFluxes.mass[SurfaceFluxes::MS_RAIN] + 
-                   surfFluxes.mass[SurfaceFluxes::MS_SNOW];     // Total precipitation [kg/m²]
+                   surfFluxes.mass[SurfaceFluxes::MS_HNW];      // Total precipitation [kg/m²] (rain + solid)
     *mass_sublim = surfFluxes.mass[SurfaceFluxes::MS_SUBLIMATION]; // Sublimation [kg/m²]
     *mass_melt = surfFluxes.mass[SurfaceFluxes::MS_SNOWPACK_RUNOFF]; // Melt runoff [kg/m²]
     

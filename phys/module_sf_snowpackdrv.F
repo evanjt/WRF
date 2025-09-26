@@ -17,11 +17,6 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
                ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
-               ! CRYOWRF arrays for detailed diagnostics
-               SN_T,     SN_THICK,  SN_VOLI,   SN_VOLW,   SN_VOLV,      & ! CRYOWRF layer arrays
-               SN_RG,    SN_RB,     SN_DD,     SN_SP,     SN_NLAYERS,   & ! CRYOWRF layer arrays
-               M_BUDG_PRECIP, M_BUDG_SUBLIM, M_BUDG_MELT,              & ! CRYOWRF mass budgets
-               E_BUDG_LW_IN, E_BUDG_SENSIBLE, E_BUDG_LATENT,           & ! CRYOWRF energy budgets
                ids,ide,  jds,jde,  kds,kde,                    &
                ims,ime,  jms,jme,  kms,kme,                    &
                its,ite,  jts,jte,  kts,kte     )
@@ -82,23 +77,6 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  Z0        ! combined z0 sent to coupled model
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ZNT       ! thermal roughness length
 
-! CRYOWRF arrays (from WRF Registry)
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_T      ! Layer temperatures [K]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_THICK  ! Layer thickness [m]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLI   ! Ice volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLW   ! Water volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_VOLV   ! Air volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_RG     ! Grain radius [mm]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_RB     ! Bond radius [mm]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_DD     ! Dendricity [-]
-    REAL,    DIMENSION( ims:ime, 1:50,    jms:jme ), INTENT(INOUT) ::  SN_SP     ! Sphericity [-]
-    INTEGER, DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  SN_NLAYERS ! Number of layers [-]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_PRECIP   ! Mass budget precip [kg/m²]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_SUBLIM   ! Mass budget sublim [kg/m²]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  M_BUDG_MELT     ! Mass budget melt [kg/m²]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_LW_IN    ! Energy budget LW [W/m²]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_SENSIBLE ! Energy budget sensible [W/m²]
-    REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  E_BUDG_LATENT   ! Energy budget latent [W/m²]
 
     INTEGER, INTENT(IN   )   ::     ids,ide, jds,jde, kds,kde
     INTEGER, INTENT(IN   )   ::     ims,ime, jms,jme, kms,kme
@@ -109,12 +87,12 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     TYPE(SnowpackInterface) :: interface_data
 
 !-------------------------------------------------------------------
-!  Call SNOWPACK physics with CRYOWRF array integration
+!  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
 !-------------------------------------------------------------------
 
     ! Diagnostic message
     IF (itimestep == 1) THEN
-        CALL wrf_message('*** SNOWPACK LSM: CRYOWRF array integration active ***')
+        CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
     END IF
 
     ! Grid loop with structured data approach
@@ -147,40 +125,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
             SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J))
         
-        ! Populate CRYOWRF layer arrays
-        SN_NLAYERS(I,J) = interface_data%layers%n_layers
-        DO K = 1, interface_data%layers%n_layers
-            SN_T(I,K,J) = interface_data%layers%layer_temp(K)
-            SN_THICK(I,K,J) = interface_data%layers%layer_thick(K)
-            SN_VOLI(I,K,J) = interface_data%layers%vol_ice(K)
-            SN_VOLW(I,K,J) = interface_data%layers%vol_water(K)
-            SN_VOLV(I,K,J) = interface_data%layers%vol_air(K)
-            SN_RG(I,K,J) = interface_data%layers%grain_radius(K)
-            SN_RB(I,K,J) = interface_data%layers%bond_radius(K)
-            SN_DD(I,K,J) = interface_data%layers%dendricity(K)
-            SN_SP(I,K,J) = interface_data%layers%sphericity(K)
-        END DO
-        
-        ! Clear unused layers
-        DO K = interface_data%layers%n_layers + 1, 50
-            SN_T(I,K,J) = 0.0
-            SN_THICK(I,K,J) = 0.0
-            SN_VOLI(I,K,J) = 0.0
-            SN_VOLW(I,K,J) = 0.0
-            SN_VOLV(I,K,J) = 0.0
-            SN_RG(I,K,J) = 0.0
-            SN_RB(I,K,J) = 0.0
-            SN_DD(I,K,J) = 0.0
-            SN_SP(I,K,J) = 0.0
-        END DO
-        
-        ! Populate CRYOWRF budget arrays
-        M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip
-        M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim
-        M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt
-        E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in
-        E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible
-        E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent
+        ! Note: CRYOWRF layer arrays not populated in simplified interface
+        ! Layer diagnostics available in interface_data%layers for future use
         
         ! Update accumulated variables from budget tracking
         ACSNOM(I,J) = interface_data%budgets%accum_snowmelt

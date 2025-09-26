@@ -305,7 +305,9 @@ submodules :
 # C++ object compilation for SNOWPACK interface
 snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp submodules
 	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
-	
+
+# Fortran module dependencies for SNOWPACK interface
+module_sf_snowpackdrv.o: module_snowpack_types.o
 clean:
 	@ echo 'use the clean script'
 

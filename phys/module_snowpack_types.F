@@ -248,8 +248,41 @@ SUBROUTINE snowpack_physics_structured(interface_data)
 !-------------------------------------------------------------------
 ! Structured interface to SNOWPACK physics with layer extraction
 !-------------------------------------------------------------------
-    USE module_sf_snowpack, ONLY: snowpack_physics_layers_c
+    USE, INTRINSIC :: iso_c_binding
     TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    
+    ! C interface declaration (avoiding circular dependency)
+    INTERFACE
+        SUBROUTINE snowpack_physics_layers_c( &
+            temp_air, humidity, wind_speed, wind_dir, &
+            shortwave_in, longwave_in, precipitation, pressure, height, dt, &
+            i_grid, j_grid, &
+            snow_swe, snow_depth, surface_temp, &
+            heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
+            n_layers, &
+            layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
+            layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
+            mass_precip, mass_sublim, mass_melt, &
+            energy_lw_in, energy_sensible, energy_latent) BIND(C, name="snowpack_physics_layers")
+          
+          USE, INTRINSIC :: iso_c_binding
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
+          INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid, j_grid
+          
+          REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
+          REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
+          
+          INTEGER(C_INT), INTENT(OUT) :: n_layers
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_temp(50), layer_thick(50)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_vol_ice(50), layer_vol_water(50), layer_vol_air(50)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_grain_radius(50), layer_bond_radius(50)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_dendricity(50), layer_sphericity(50)
+          REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt
+          REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_sensible, energy_latent
+          
+        END SUBROUTINE snowpack_physics_layers_c
+    END INTERFACE
     
     ! Local variables for C interface
     REAL(8) :: temp_air, humidity, wind_speed, wind_dir
