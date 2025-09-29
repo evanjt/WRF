@@ -34,6 +34,11 @@ static std::unique_ptr<SnowpackConfig> global_config;
 static std::unique_ptr<SnowpackIO> global_snowpack_io;
 static bool config_initialized = false;
 static std::string config_file_path;
+
+// Global time management (CRYOWRF pattern)
+static mio::Date current_simulation_date;  // Current WRF simulation time
+static bool time_initialized = false;      // Track initialization
+static double calculation_step_length = 15.0; // From SNOWPACK config (minutes)
 static bool use_state_persistence = false;  // Enable .sno file persistence
 
 // Persistent SnowStation storage per grid point (CRYOWRF pattern)
@@ -193,8 +198,17 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
         return station_it->second.get();
     }
     
-    // Create new SnowStation for this grid point
-    auto new_station = std::make_unique<SnowStation>(true, true, false, false); // canopy, soil, alpine3d, seaice
+    // Create new SnowStation for this grid point - read configuration for correct parameters
+    int canopy_value;
+    bool use_soil;
+    global_config->getValue("CANOPY", "Snowpack", canopy_value);
+    global_config->getValue("SNP_SOIL", "Snowpack", use_soil);
+    
+    const bool use_canopy = (canopy_value != 0);
+    const bool alpine3d = false; // WRF integration, not Alpine3D
+    const bool sea_ice = false;  // Standard snowpack mode
+    
+    auto new_station = std::make_unique<SnowStation>(use_canopy, use_soil, alpine3d, sea_ice);
     
     // Set up basic station metadata using correct API
     mio::Coords position;
@@ -283,6 +297,23 @@ void initialize_snowpack_config_c(const char* ini_file_path) {
     initialize_snowpack_config_with_path(path_str);
 }
 
+// Initialize WRF simulation time (CRYOWRF pattern - called once from Fortran)
+void initialize_wrf_simulation_time_c(int start_year, int start_month, int start_day, 
+                                      int start_hour, int start_minute) {
+    try {
+        // Initialize simulation time with WRF namelist start time (CRYOWRF pattern)
+        current_simulation_date = mio::Date(start_year, start_month, start_day, 
+                                           start_hour, start_minute, 0.0, 0.0);
+        time_initialized = true;
+        
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: WRF simulation time initialized to %s\n", 
+               current_simulation_date.toString(mio::Date::ISO).c_str());
+    } catch (const std::exception& e) {
+        printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Failed to initialize time: %s\n", e.what());
+        std::abort();
+    }
+}
+
 // Get current configuration file path
 void get_snowpack_config_path_c(char* path_buffer, int buffer_size) {
     if (config_initialized) {
@@ -357,7 +388,17 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     }
     
     // Set up current meteorology
-    mio::Date current_time(2010, 7, 16, 0, 0, 0.0, 0.0);  // Dummy date with timezone
+    // CRITICAL: Use advancing WRF simulation time (CRYOWRF pattern)
+    // Time must be initialized by Fortran using WRF namelist values
+    if (!time_initialized) {
+        printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Time not initialized! Call initialize_wrf_simulation_time_c() first from Fortran\n");
+        std::abort();
+    }
+    
+    // Advance time with each timestep call (CRYOWRF pattern - line 862)
+    current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+    
+    mio::Date current_time = current_simulation_date;  // Use advancing time
     
     // Temperature sanity check
     double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN, 
@@ -493,7 +534,17 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     }
     
     // Set up current meteorology
-    mio::Date current_time(2010, 7, 16, 0, 0, 0.0, 0.0);
+    // CRITICAL: Use advancing WRF simulation time (CRYOWRF pattern)
+    // Time must be initialized by Fortran using WRF namelist values
+    if (!time_initialized) {
+        printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Time not initialized! Call initialize_wrf_simulation_time_c() first from Fortran\n");
+        std::abort();
+    }
+    
+    // Advance time with each timestep call (CRYOWRF pattern - line 862)
+    current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+    
+    mio::Date current_time = current_simulation_date;  // Use advancing time
     
     // Temperature sanity check
     double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN, 

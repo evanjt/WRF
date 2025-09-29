@@ -17,6 +17,12 @@ MODULE module_sf_snowpackdrv
             CHARACTER(KIND=C_CHAR), INTENT(IN) :: ini_file_path(*)
         END SUBROUTINE initialize_snowpack_config_c
         
+        SUBROUTINE initialize_wrf_simulation_time_c(start_year, start_month, start_day, &
+            start_hour, start_minute) BIND(C, name='initialize_wrf_simulation_time_c')
+            USE ISO_C_BINDING
+            INTEGER(C_INT), INTENT(IN) :: start_year, start_month, start_day, start_hour, start_minute
+        END SUBROUTINE initialize_wrf_simulation_time_c
+        
         SUBROUTINE extract_snowpack_layers_c(i_grid, j_grid, &
             layer_temps, layer_thick, layer_voli, layer_volw, layer_volv, &
             layer_rg, layer_rb, layer_dd, layer_sp, n_layers) &
@@ -36,7 +42,13 @@ CONTAINS
 ! Initialize SNOWPACK configuration (called once)
 !-------------------------------------------------------------------
 SUBROUTINE initialize_snowpack_module_config()
+    USE module_configure  ! For nl_get_* functions
     IMPLICIT NONE
+    
+    ! Local variables for WRF namelist time values (CRYOWRF pattern)
+    INTEGER :: simulation_start_year, simulation_start_month, simulation_start_day
+    INTEGER :: simulation_start_hour, simulation_start_minute
+    INTEGER :: domain_id
     
     IF (config_initialized) RETURN
     
@@ -46,10 +58,13 @@ SUBROUTINE initialize_snowpack_module_config()
     ! Initialize SNOWPACK configuration with the file
     CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
     
+    ! Note: WRF time initialization will be done later in snowpacklsm() 
+    ! when namelist is fully available (CRYOWRF pattern)
+    
     config_initialized = .true.
     
     ! Diagnostic message
-    CALL wrf_message('*** SNOWPACK LSM: Configuration initialized from ' // TRIM(config_file_path) // ' ***')
+    CALL wrf_message('*** SNOWPACK LSM: Initialized with WRF namelist time (CRYOWRF pattern) ***')
     
 END SUBROUTINE initialize_snowpack_module_config
 
@@ -72,6 +87,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 !-------------------------------------------------------------------
     USE module_sf_snowpack
     USE module_snowpack_types
+    USE module_configure  ! For nl_get_* functions
     USE ISO_C_BINDING
     IMPLICIT NONE
 !-------------------------------------------------------------------
@@ -156,6 +172,12 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 ! Local Variables
     INTEGER :: I, J, K
     TYPE(SnowpackInterface) :: interface_data
+    
+    ! Time initialization variables (CRYOWRF pattern)
+    INTEGER, SAVE :: simulation_start_year, simulation_start_month, simulation_start_day
+    INTEGER, SAVE :: simulation_start_hour, simulation_start_minute
+    LOGICAL, SAVE :: time_initialized = .FALSE.
+    INTEGER :: domain_id
 
 !-------------------------------------------------------------------
 !  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
@@ -163,6 +185,67 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 
     ! Initialize SNOWPACK configuration on first call
     CALL initialize_snowpack_module_config()
+    
+    ! Initialize WRF simulation time on first call (CRYOWRF pattern)
+    IF (.NOT. time_initialized) THEN
+        ! Use proper domain ID from WRF (CRYOWRF pattern)
+        domain_id = INEST  ! Use the actual domain ID passed by WRF
+        
+        WRITE(*,'(A,I3,A,I6)') 'SNOWPACK-DEBUG: Starting time initialization for domain ', &
+                               domain_id, ' at timestep ', itimestep
+        
+        ! Initialize variables to detect if nl_get functions fail
+        simulation_start_year   = -999
+        simulation_start_month  = -999
+        simulation_start_day    = -999
+        simulation_start_hour   = -999
+        simulation_start_minute = -999
+        
+        WRITE(*,'(A,5I12)') 'SNOWPACK-DEBUG: Initialized values (should be -999): ', &
+                            simulation_start_year, simulation_start_month, simulation_start_day, &
+                            simulation_start_hour, simulation_start_minute
+        
+        ! Get actual namelist values using WRF's nl_get_* functions (like CRYOWRF)
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_year...'
+        CALL nl_get_start_year   ( domain_id, simulation_start_year   )
+        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_year, value = ', simulation_start_year
+        
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_month...'
+        CALL nl_get_start_month  ( domain_id, simulation_start_month  )
+        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_month, value = ', simulation_start_month
+        
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_day...'
+        CALL nl_get_start_day    ( domain_id, simulation_start_day    )
+        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_day, value = ', simulation_start_day
+        
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_hour...'
+        CALL nl_get_start_hour   ( domain_id, simulation_start_hour   )
+        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_hour, value = ', simulation_start_hour
+        
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_minute...'
+        CALL nl_get_start_minute ( domain_id, simulation_start_minute )
+        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_minute, value = ', simulation_start_minute
+        
+        WRITE(*,'(A,I3,A,5I12)') 'SNOWPACK-DEBUG: Domain ', domain_id, &
+                                ' final retrieved WRF namelist time: ', &
+                                simulation_start_year, simulation_start_month, simulation_start_day, &
+                                simulation_start_hour, simulation_start_minute
+        
+        ! Validate the retrieved values
+        IF (simulation_start_year < 1900 .OR. simulation_start_year > 2100 .OR. &
+            simulation_start_month < 1 .OR. simulation_start_month > 12 .OR. &
+            simulation_start_day < 1 .OR. simulation_start_day > 31 .OR. &
+            simulation_start_hour < 0 .OR. simulation_start_hour > 23 .OR. &
+            simulation_start_minute < 0 .OR. simulation_start_minute > 59) THEN
+            
+            CALL wrf_error_fatal('SNOWPACK-FATAL: Invalid namelist time values - nl_get_* functions failed')
+        ENDIF
+        
+        CALL initialize_wrf_simulation_time_c(simulation_start_year, simulation_start_month, &
+                                              simulation_start_day, simulation_start_hour, &
+                                              simulation_start_minute)
+        time_initialized = .TRUE.
+    ENDIF
     
     ! Diagnostic message
     IF (itimestep == 1) THEN
