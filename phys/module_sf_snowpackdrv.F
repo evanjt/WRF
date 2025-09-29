@@ -17,13 +17,12 @@ MODULE module_sf_snowpackdrv
             CHARACTER(KIND=C_CHAR), INTENT(IN) :: ini_file_path(*)
         END SUBROUTINE initialize_snowpack_config_c
         
-        SUBROUTINE extract_snowpack_layers_c(interface_data, &
+        SUBROUTINE extract_snowpack_layers_c(i_grid, j_grid, &
             layer_temps, layer_thick, layer_voli, layer_volw, layer_volv, &
             layer_rg, layer_rb, layer_dd, layer_sp, n_layers) &
             BIND(C, name='extract_snowpack_layers_c')
             USE ISO_C_BINDING
-            USE module_snowpack_types
-            TYPE(SnowpackInterface), INTENT(IN) :: interface_data
+            INTEGER(C_INT), INTENT(IN) :: i_grid, j_grid
             REAL(C_FLOAT), INTENT(OUT) :: layer_temps(50), layer_thick(50)
             REAL(C_FLOAT), INTENT(OUT) :: layer_voli(50), layer_volw(50), layer_volv(50)
             REAL(C_FLOAT), INTENT(OUT) :: layer_rg(50), layer_rb(50), layer_dd(50), layer_sp(50)
@@ -202,7 +201,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         
         ! Extract CRYOWRF layer arrays if present (matching CRYOWRF behavior)
         IF (PRESENT(SN_T)) THEN
-            CALL extract_snowpack_layers_c(interface_data, &
+            CALL extract_snowpack_layers_c(I, J, &
                 SN_T(I,:,J), SN_THICK(I,:,J), SN_VOLI(I,:,J), SN_VOLW(I,:,J), SN_VOLV(I,:,J), &
                 SN_RG(I,:,J), SN_RB(I,:,J), SN_DD(I,:,J), SN_SP(I,:,J), SN_NLAYERS(I,J))
         END IF
