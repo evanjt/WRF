@@ -71,6 +71,19 @@ mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file
     try {
         // Load configuration from file
         mio::Config config(ini_file_path);
+        
+        // CRYOWRF compatibility: Calculate METEO_STEP_LENGTH from CALCULATION_STEP_LENGTH
+        // Following exact CRYOWRF pattern: meteo_step_length = M_TO_S(calculation_step_length)
+        const double calculation_step_length = config.get("CALCULATION_STEP_LENGTH", "Snowpack");
+        const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds (M_TO_S)
+        
+        // Add METEO_STEP_LENGTH to config dynamically (CRYOWRF pattern)
+        std::stringstream ss_meteo_length;
+        ss_meteo_length << meteo_step_length;
+        config.addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
+        
+        printf("SNOWPACK-INFO [C++/SnowpackConfigManager]: CRYOWRF pattern - METEO_STEP_LENGTH = %.1f seconds (from CALCULATION_STEP_LENGTH = %.1f minutes)\n", 
+               meteo_step_length, calculation_step_length);
         printf("SNOWPACK-INFO [C++/SnowpackConfigManager]: Loaded configuration from %s\n", ini_file_path.c_str());
         return config;
     } catch (const std::exception& e) {
