@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <cstring>
+#include <vector>
 
 // SNOWPACK v11.08 headers - relative paths from phys/snowpack/
 #include "meteoio/meteoio/MeteoIO.h"
@@ -18,9 +20,18 @@
 #include "snowpack/snowpack/SnowpackConfig.h"
 #include "snowpack/snowpack/snowpackCore/Snowpack.h"
 
+// Configuration management
+class SnowpackConfigManager {
+public:
+    static mio::Config loadConfiguration(const std::string& ini_file_path);
+    static void validateConfiguration(const mio::Config& cfg);
+    static std::string getDefaultConfigPath();
+};
+
 // Global configuration (shared, read-only)
 static std::unique_ptr<SnowpackConfig> global_config;
 static bool config_initialized = false;
+static std::string config_file_path;
 
 // SNOWPACK Configuration Constants
 namespace SnowpackConstants {
@@ -46,56 +57,107 @@ namespace SnowpackConstants {
   constexpr double DEFAULT_LONGITUDE = 8.0;          // Default longitude for physics [degrees E]
 }
 
+// SnowpackConfigManager implementation
+mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file_path) {
+    try {
+        // Load configuration from file
+        mio::Config config(ini_file_path);
+        printf("SNOWPACK-INFO [C++/SnowpackConfigManager]: Loaded configuration from %s\n", ini_file_path.c_str());
+        return config;
+    } catch (const std::exception& e) {
+        printf("SNOWPACK-ERROR [C++/SnowpackConfigManager]: Failed to load %s: %s\n", ini_file_path.c_str(), e.what());
+        throw;
+    }
+}
+
+void SnowpackConfigManager::validateConfiguration(const mio::Config& cfg) {
+    // Check for essential SNOWPACK parameters
+    std::vector<std::pair<std::string, std::string>> required_params = {
+        {"CALCULATION_STEP_LENGTH", "Snowpack"},
+        {"FORCING", "Snowpack"},
+        {"SNP_SOIL", "Snowpack"},
+        {"SOIL_FLUX", "Snowpack"},
+        {"VARIANT", "SnowpackAdvanced"}
+    };
+    
+    for (const auto& param : required_params) {
+        try {
+            std::string value;
+            cfg.getValue(param.first, param.second, value);
+            printf("SNOWPACK-VALIDATE [C++]: %s::%s = %s\n", param.second.c_str(), param.first.c_str(), value.c_str());
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-ERROR [C++/SnowpackConfigManager]: Missing required parameter %s::%s\n", 
+                   param.second.c_str(), param.first.c_str());
+            throw std::runtime_error("Configuration validation failed: missing " + param.first);
+        }
+    }
+    
+    printf("SNOWPACK-INFO [C++/SnowpackConfigManager]: Configuration validation passed\n");
+}
+
+std::string SnowpackConfigManager::getDefaultConfigPath() {
+    return "./io.ini";  // Default path in WRF run directory
+}
+
+// Function declarations
+void initialize_snowpack_config_with_path(const std::string& ini_path);
+
 // Initialize SNOWPACK configuration (once, globally)
 void initialize_snowpack_config() {
-  if (config_initialized) return;
-  
-  // Create empty config first, then add keys
-  mio::Config base_config;
+    initialize_snowpack_config_with_path(SnowpackConfigManager::getDefaultConfigPath());
+}
 
-  // SNOWPACK configuration matching CRYOWRF exactly
-  // [Snowpack] section - core settings
-  base_config.addKey("CALCULATION_STEP_LENGTH", "Snowpack", std::to_string(SnowpackConstants::CALCULATION_STEP_MINUTES));
-  base_config.addKey("METEO_STEP_LENGTH", "Snowpack", std::to_string(SnowpackConstants::CALCULATION_STEP_MINUTES));
-  base_config.addKey("MEAS_TSS", "Snowpack", "FALSE");
-  base_config.addKey("ENFORCE_MEASURED_SNOW_HEIGHTS", "Snowpack", "FALSE");
-  base_config.addKey("SW_MODE", "Snowpack", "INCOMING");
-  base_config.addKey("INCOMING_LONGWAVE", "Snowpack", "TRUE");
-  base_config.addKey("HEIGHT_OF_WIND_VALUE", "Snowpack", std::to_string(SnowpackConstants::WIND_HEIGHT_METERS));
-  base_config.addKey("HEIGHT_OF_METEO_VALUES", "Snowpack", std::to_string(SnowpackConstants::METEO_HEIGHT_METERS));
-  base_config.addKey("ATMOSPHERIC_STABILITY", "Snowpack", "MO_HOLTSLAG");
-  base_config.addKey("ROUGHNESS_LENGTH", "Snowpack", std::to_string(SnowpackConstants::ROUGHNESS_LENGTH_METERS));
-  base_config.addKey("NUMBER_SLOPES", "Snowpack", "1");
-  base_config.addKey("CHANGE_BC", "Snowpack", "FALSE");
-  base_config.addKey("SNP_SOIL", "Snowpack", "FALSE");
-  base_config.addKey("SOIL_FLUX", "Snowpack", "TRUE");
-  base_config.addKey("GEO_HEAT", "Snowpack", std::to_string(SnowpackConstants::GEO_HEAT_FLUX));
-  base_config.addKey("CANOPY", "Snowpack", std::to_string(SnowpackConstants::CANOPY_NONE));
-  base_config.addKey("FORCING", "Snowpack", "ATMOS");
-  
-  // [SnowpackAdvanced] section - advanced settings
-  base_config.addKey("VARIANT", "SnowpackAdvanced", "DEFAULT");
-  base_config.addKey("RESEARCH_MODE", "SnowpackAdvanced", "TRUE");
-  base_config.addKey("ALLOW_ADAPTIVE_TIMESTEPPING", "SnowpackAdvanced", "TRUE");
-  base_config.addKey("SNOW_EROSION", "SnowpackAdvanced", "FALSE");
-  base_config.addKey("DETECT_GRASS", "SnowpackAdvanced", "TRUE");
-  base_config.addKey("HN_DENSITY", "SnowpackAdvanced", "PARAMETERIZED");
-  base_config.addKey("HN_DENSITY_PARAMETERIZATION", "SnowpackAdvanced", "ZWART");
-  base_config.addKey("AVG_METHOD_HYDRAULIC_CONDUCTIVITY", "SnowpackAdvanced", "ARITHMETICMEAN");
-  base_config.addKey("WATERTRANSPORTMODEL_SNOW", "SnowpackAdvanced", "RICHARDSEQUATION");
-  base_config.addKey("WATERTRANSPORTMODEL_SOIL", "SnowpackAdvanced", "RICHARDSEQUATION");
-  base_config.addKey("ENABLE_VAPOUR_TRANSPORT", "SnowpackAdvanced", "FALSE");
-
-  // Create SnowpackConfig from mio::Config
-  global_config = std::make_unique<SnowpackConfig>(base_config);
-  config_initialized = true;
-
-  printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: ✓ Timestep: %.1f min, SNP_SOIL: FALSE\n", 
-         SnowpackConstants::CALCULATION_STEP_MINUTES);
+// Initialize SNOWPACK configuration with specific file path
+void initialize_snowpack_config_with_path(const std::string& ini_path) {
+    if (config_initialized) return;
+    
+    try {
+        // Load configuration from file
+        mio::Config file_config = SnowpackConfigManager::loadConfiguration(ini_path);
+        
+        // Validate configuration
+        SnowpackConfigManager::validateConfiguration(file_config);
+        
+        // Create SnowpackConfig from file
+        global_config = std::make_unique<SnowpackConfig>(file_config);
+        config_file_path = ini_path;
+        config_initialized = true;
+        
+        // Extract and report key settings
+        std::string calc_step, snp_soil;
+        file_config.getValue("CALCULATION_STEP_LENGTH", "Snowpack", calc_step);
+        file_config.getValue("SNP_SOIL", "Snowpack", snp_soil);
+        
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Configured from %s - Timestep: %s min, SNP_SOIL: %s\n", 
+               ini_path.c_str(), calc_step.c_str(), snp_soil.c_str());
+               
+    } catch (const std::exception& e) {
+        printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Configuration failed for %s: %s\n", 
+               ini_path.c_str(), e.what());
+        printf("SNOWPACK-FATAL: Unable to load SNOWPACK configuration - WRF run will abort\n");
+        throw;
+    }
 }
 
 // C interface for Fortran binding
 extern "C" {
+
+// Initialize configuration with specific path (called from Fortran)
+void initialize_snowpack_config_c(const char* ini_file_path) {
+    std::string path_str(ini_file_path);
+    initialize_snowpack_config_with_path(path_str);
+}
+
+// Get current configuration file path
+void get_snowpack_config_path_c(char* path_buffer, int buffer_size) {
+    if (config_initialized) {
+        strncpy(path_buffer, config_file_path.c_str(), buffer_size - 1);
+        path_buffer[buffer_size - 1] = '\0';
+    } else {
+        strncpy(path_buffer, "NOT_INITIALIZED", buffer_size - 1);
+        path_buffer[buffer_size - 1] = '\0';
+    }
+}
 
 void snowpack_physics(double temp_air, double humidity, double wind_speed, double wind_dir,
                       double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
@@ -117,7 +179,7 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   try {
     initialize_snowpack_config();
   } catch (const std::exception& e) {
-    printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: ❌ Configuration failed: %s\n", e.what());
+    printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Configuration failed: %s\n", e.what());
     printf("SNOWPACK-FATAL: Aborting WRF run due to SNOWPACK configuration failure\n");
     std::abort();  // Abort instead of silent fallback
   }
@@ -220,7 +282,7 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     // Temporary objects automatically destroyed here - no memory leaks!
     
   } catch (const std::exception& e) {
-    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: ❌ Error in grid (%d,%d): %s\n", 
+    printf("SNOWPACK-ERROR [C++/snowpack_wrf_bridge.cpp]: Error in grid (%d,%d): %s\n", 
            i_grid, j_grid, e.what());
     printf("SNOWPACK-ERROR: Grid point (%d,%d) - Ta=%.2fK, RH=%.2f, Precip=%.3fmm\n", 
            i_grid, j_grid, temp_air, humidity, precipitation);

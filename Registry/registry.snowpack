@@ -31,6 +31,7 @@ state    real   SNOWPACK_SNOWH_TS ijkft   misc        1         -     "SNOWPACK_
 
 # Namelist parameters for SNOWPACK configuration
 rconfig   integer sf_snowpack_physics    namelist,physics   1            0       -      "sf_snowpack_physics"    "SNOWPACK LAND SURFACE OPTION"
+rconfig   character snowpack_config_file namelist,physics   max_domains  "io.ini"  -    "snowpack_config_file"   "SNOWPACK CONFIGURATION FILE PATH"
 
 # CRYOWRF-compatible snow layer arrays (without blowing snow complexity)
 state   real    sn_T     i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_T"      "snowpack layer temperature" "K"

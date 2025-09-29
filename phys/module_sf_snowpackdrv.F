@@ -5,7 +5,40 @@
 !
 MODULE module_sf_snowpackdrv
 
+    ! Module-level configuration management
+    LOGICAL, SAVE :: config_initialized = .false.
+    CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
+    
+    ! C interface for SNOWPACK configuration
+    INTERFACE
+        SUBROUTINE initialize_snowpack_config_c(ini_file_path) BIND(C, name='initialize_snowpack_config_c')
+            USE ISO_C_BINDING
+            CHARACTER(KIND=C_CHAR), INTENT(IN) :: ini_file_path(*)
+        END SUBROUTINE initialize_snowpack_config_c
+    END INTERFACE
+
 CONTAINS
+
+!-------------------------------------------------------------------
+! Initialize SNOWPACK configuration (called once)
+!-------------------------------------------------------------------
+SUBROUTINE initialize_snowpack_module_config()
+    IMPLICIT NONE
+    
+    IF (config_initialized) RETURN
+    
+    ! Use default io.ini path
+    config_file_path = './io.ini'
+    
+    ! Initialize SNOWPACK configuration with the file
+    CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
+    
+    config_initialized = .true.
+    
+    ! Diagnostic message
+    CALL wrf_message('*** SNOWPACK LSM: Configuration initialized from ' // TRIM(config_file_path) // ' ***')
+    
+END SUBROUTINE initialize_snowpack_module_config
 
 !-------------------------------------------------------------------
 SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-related
@@ -23,6 +56,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 !-------------------------------------------------------------------
     USE module_sf_snowpack
     USE module_snowpack_types
+    USE ISO_C_BINDING
     IMPLICIT NONE
 !-------------------------------------------------------------------
 
@@ -90,6 +124,9 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 !  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
 !-------------------------------------------------------------------
 
+    ! Initialize SNOWPACK configuration on first call
+    CALL initialize_snowpack_module_config()
+    
     ! Diagnostic message
     IF (itimestep == 1) THEN
         CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
