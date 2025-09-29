@@ -472,4 +472,56 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
   }
 }
 
+// Extract detailed layer data from SNOWPACK for CRYOWRF compatibility
+void extract_snowpack_layers_c(SnowpackInterface* interface_data,
+                               float layer_temps[50], float layer_thick[50],
+                               float layer_voli[50], float layer_volw[50], float layer_volv[50],
+                               float layer_rg[50], float layer_rb[50], 
+                               float layer_dd[50], float layer_sp[50],
+                               int* n_layers) {
+  try {
+    // Initialize all arrays to zero
+    for (int i = 0; i < 50; i++) {
+      layer_temps[i] = 0.0f;
+      layer_thick[i] = 0.0f;
+      layer_voli[i] = 0.0f;
+      layer_volw[i] = 0.0f;
+      layer_volv[i] = 0.0f;
+      layer_rg[i] = 0.0f;
+      layer_rb[i] = 0.0f;
+      layer_dd[i] = 0.0f;
+      layer_sp[i] = 1.0f;  // Default sphericity
+    }
+    
+    // Access SnowStation from the interface
+    // Note: This is simplified - in reality we'd need to access the actual
+    // SNOWPACK SnowStation object from the interface_data structure
+    // For now, populate with placeholder values based on surface conditions
+    
+    if (interface_data->surface.snow_depth > 0.001) {
+      // Simple snow layers based on snow depth
+      *n_layers = std::min(10, (int)(interface_data->surface.snow_depth * 100));  // 1 layer per cm
+      
+      for (int i = 0; i < *n_layers; i++) {
+        // Simple layer properties (to be replaced with actual SNOWPACK extraction)
+        layer_temps[i] = std::min(273.15f, interface_data->surface.surface_temp);  // Snow temp <= 0°C
+        layer_thick[i] = interface_data->surface.snow_depth / *n_layers;           // Equal thickness layers
+        layer_voli[i] = 0.3f;     // 30% ice volume fraction
+        layer_volw[i] = 0.0f;     // No liquid water initially
+        layer_volv[i] = 0.7f;     // 70% air volume fraction
+        layer_rg[i] = 0.4f;       // Grain radius [mm]
+        layer_rb[i] = 0.1f;       // Bond radius [mm]
+        layer_dd[i] = 0.0f;       // Dendricity
+        layer_sp[i] = 1.0f;       // Sphericity
+      }
+    } else {
+      *n_layers = 0;
+    }
+    
+  } catch (const std::exception& e) {
+    printf("SNOWPACK-ERROR: Layer extraction failed: %s\n", e.what());
+    *n_layers = 0;
+  }
+}
+
 } // extern "C"

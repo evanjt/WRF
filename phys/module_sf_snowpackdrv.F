@@ -10,12 +10,25 @@ MODULE module_sf_snowpackdrv
     LOGICAL, SAVE :: config_initialized = .false.
     CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
     
-    ! C interface for SNOWPACK configuration
+    ! C interface for SNOWPACK configuration and layer extraction
     INTERFACE
         SUBROUTINE initialize_snowpack_config_c(ini_file_path) BIND(C, name='initialize_snowpack_config_c')
             USE ISO_C_BINDING
             CHARACTER(KIND=C_CHAR), INTENT(IN) :: ini_file_path(*)
         END SUBROUTINE initialize_snowpack_config_c
+        
+        SUBROUTINE extract_snowpack_layers_c(interface_data, &
+            layer_temps, layer_thick, layer_voli, layer_volw, layer_volv, &
+            layer_rg, layer_rb, layer_dd, layer_sp, n_layers) &
+            BIND(C, name='extract_snowpack_layers_c')
+            USE ISO_C_BINDING
+            USE module_snowpack_types
+            TYPE(SnowpackInterface), INTENT(IN) :: interface_data
+            REAL(C_FLOAT), INTENT(OUT) :: layer_temps(50), layer_thick(50)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_voli(50), layer_volw(50), layer_volv(50)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_rg(50), layer_rb(50), layer_dd(50), layer_sp(50)
+            INTEGER(C_INT), INTENT(OUT) :: n_layers
+        END SUBROUTINE extract_snowpack_layers_c
     END INTERFACE
 
 CONTAINS
@@ -51,6 +64,9 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
                ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
+               SN_T,SN_THICK,SN_VOLI,SN_VOLW,SN_VOLV,SN_RG,SN_RB,SN_DD,SN_SP,SN_NLAYERS, & ! OPTIONAL CRYOWRF layer arrays
+               M_BUDG_PRECIP,M_BUDG_SUBLIM,M_BUDG_MELT,               & ! OPTIONAL CRYOWRF mass budget
+               E_BUDG_LW_IN,E_BUDG_SENSIBLE,E_BUDG_LATENT,            & ! OPTIONAL CRYOWRF energy budget
                ids,ide,  jds,jde,  kds,kde,                    &
                ims,ime,  jms,jme,  kms,kme,                    &
                its,ite,  jts,jte,  kts,kte     )
@@ -112,6 +128,27 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  Z0        ! combined z0 sent to coupled model
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ZNT       ! thermal roughness length
 
+! CRYOWRF layer arrays (OPTIONAL - matching CRYOWRF behavior)
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_T        ! layer temperature [K]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_THICK    ! layer thickness [m]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLI     ! ice volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLW     ! water volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLV     ! air volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RG       ! grain radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RB       ! bond radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_DD       ! dendricity [-]
+    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_SP       ! sphericity [-]
+    INTEGER, DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_NLAYERS  ! number of layers
+
+! CRYOWRF mass budget arrays (OPTIONAL - matching CRYOWRF behavior)
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_PRECIP   ! mass budget precip [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_SUBLIM   ! mass budget sublim [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_MELT     ! mass budget melt [kg m-2]
+
+! CRYOWRF energy budget arrays (OPTIONAL - matching CRYOWRF behavior)
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LW_IN    ! energy budget LW in [W m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_SENSIBLE ! energy budget sensible [W m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LATENT   ! energy budget latent [W m-2]
 
     INTEGER, INTENT(IN   )   ::     ids,ide, jds,jde, kds,kde
     INTEGER, INTENT(IN   )   ::     ims,ime, jms,jme, kms,kme
@@ -163,8 +200,25 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
             SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J))
         
-        ! Note: CRYOWRF layer arrays not populated in simplified interface
-        ! Layer diagnostics available in interface_data%layers for future use
+        ! Extract CRYOWRF layer arrays if present (matching CRYOWRF behavior)
+        IF (PRESENT(SN_T)) THEN
+            CALL extract_snowpack_layers_c(interface_data, &
+                SN_T(I,:,J), SN_THICK(I,:,J), SN_VOLI(I,:,J), SN_VOLW(I,:,J), SN_VOLV(I,:,J), &
+                SN_RG(I,:,J), SN_RB(I,:,J), SN_DD(I,:,J), SN_SP(I,:,J), SN_NLAYERS(I,J))
+        END IF
+        
+        ! Extract CRYOWRF budget arrays if present (matching CRYOWRF behavior)
+        IF (PRESENT(M_BUDG_PRECIP)) THEN
+            M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip
+            M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim
+            M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt
+        END IF
+        
+        IF (PRESENT(E_BUDG_LW_IN)) THEN
+            E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in
+            E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible
+            E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent
+        END IF
         
         ! Update accumulated variables from budget tracking
         ACSNOM(I,J) = interface_data%budgets%accum_snowmelt
