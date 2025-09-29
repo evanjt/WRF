@@ -199,7 +199,7 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
             ZwischenData zdata;
             mio::Date profile_date;
             
-            global_snowpack_io->readSnowCover(sno_filename, new_station.get(), ssdata, zdata, profile_date, false);
+            global_snowpack_io->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
             printf("SNOWPACK-INFO: Loaded existing state for grid (%d,%d) from %s\n", 
                    i_grid, j_grid, sno_filename.c_str());
         } catch (const std::exception& e) {
@@ -251,7 +251,7 @@ void save_snowstation_state(int i_grid, int j_grid) {
             mio::Date current_date; // Use current system time
             ZwischenData zdata;     // Empty for basic usage
             
-            global_snowpack_io->writeSnowCover(current_date, *(station_it->second), zdata, sno_filename);
+            global_snowpack_io->writeSnowCover(current_date, *(station_it->second), zdata, false);
             printf("SNOWPACK-INFO: Saved state for grid (%d,%d) to %s\n", 
                    i_grid, j_grid, sno_filename.c_str());
         } catch (const std::exception& e) {
@@ -596,32 +596,26 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
       layer_sp[i] = 1.0f;  // Default sphericity
     }
     
-    // CRITICAL NOTE: This function requires persistent SnowStation objects per grid point
-    // Current implementation is stateless and creates temporary objects
-    // Real CRYOWRF layer extraction requires access to vecXdata.Edata[] from persistent SnowStation
+    // Use persistent SnowStation objects from our grid-based storage
+    std::string grid_key = generate_grid_key(i_grid, j_grid);
+    auto station_it = grid_snowstations.find(grid_key);
     
-    // For now, we'll create a temporary SnowStation to demonstrate the extraction pattern
-    // This will be replaced with persistent grid-based SnowStation objects in future development
+    if (station_it == grid_snowstations.end()) {
+        // No SnowStation exists for this grid point - set to zero layers
+        *n_layers = 0;
+        printf("SNOWPACK-LAYERS: Grid (%d,%d) has no persistent SnowStation - zero layers\n", 
+               i_grid, j_grid);
+        return;
+    }
     
-    // Initialize configuration
-    initialize_snowpack_config();
-    
-    // Create temporary SNOWPACK objects using correct constructor
-    SnowStation xdata(true, true, false, false); // useCanopy, useSoil, isAlpine3D, useSeaIce
-    
-    // Set up basic station metadata using correct API
-    mio::Coords position;
-    position.setLatLon(45.0, 0.0, 1000.0); // lat, lon, altitude (placeholders)
-    std::string stationID = "WRF_GRID_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
-    std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
-    xdata.meta.setStationData(position, stationID, stationName);
+    // Access persistent SnowStation for this grid point
+    const SnowStation* xdata = station_it->second.get();
     
     // CRYOWRF-style layer extraction algorithm (from Coupler.cpp:1153-1185)
-    // NOTE: Fresh SnowStation has no elements until initialized with snow data
-    // This demonstrates the correct extraction pattern for when snowpack has evolved
+    // Extract from evolved snowpack with real layer data
     
-    const std::vector<ElementData>& elem_data = xdata.Edata;
-    const int get_size = (int)xdata.getNumberOfElements();
+    const std::vector<ElementData>& elem_data = xdata->Edata;
+    const int get_size = (int)xdata->getNumberOfElements();
     const int loc_snpack_lay_to_sav = 50; // Maximum layers to save (CRYOWRF default)
     const int lim_size = std::max(0, get_size - loc_snpack_lay_to_sav);
     
@@ -629,10 +623,9 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
     int tmtm = 0;
     for (int e = get_size - 1; e >= lim_size && tmtm < 50; e--, tmtm++) {
       // Extract layer data using exact CRYOWRF algorithm
-      // NOTE: For fresh SnowStation this loop won't execute (get_size = 0)
-      // With persistent SnowStation objects, evolved snowpack layers will be available for extraction
-      if (e + 1 < (int)xdata.Ndata.size()) { // Safety check for node access
-        layer_temps[tmtm] = (float)xdata.Ndata[e + 1].T;        // Node temperature [K]
+      // With persistent SnowStation objects, evolved snowpack layers are available for extraction
+      if (e + 1 < (int)xdata->Ndata.size()) { // Safety check for node access
+        layer_temps[tmtm] = (float)xdata->Ndata[e + 1].T;        // Node temperature [K]
       }
       layer_thick[tmtm] = (float)elem_data[e].L;                // Layer thickness [m]
       layer_voli[tmtm] = (float)elem_data[e].theta[ICE] * 100.0f; // Ice volume fraction [%]
@@ -646,7 +639,7 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
     
     *n_layers = get_size; // Total number of layers (following CRYOWRF: sn_nlayer = get_size)
     
-    printf("SNOWPACK-LAYERS: Grid (%d,%d) extracted %d layers using CRYOWRF algorithm (temporary SnowStation)\n", 
+    printf("SNOWPACK-LAYERS: Grid (%d,%d) extracted %d layers using CRYOWRF algorithm (persistent SnowStation)\n", 
            i_grid, j_grid, *n_layers);
     
   } catch (const std::exception& e) {

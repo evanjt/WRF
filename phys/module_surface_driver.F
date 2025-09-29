@@ -326,6 +326,12 @@ CONTAINS
      &          ,irrigation,sf_surf_irr_scheme, irr_daily_amount      & !IRRIG
      &          ,irr_start_hour,irr_num_hours,irr_start_julianday     &
      &          ,irr_end_julianday,irr_freq,irr_ph,irr_rand_field     &
+     ! CRYOWRF layer arrays (OPTIONAL - for SNOWPACK physics)
+     &          ,sn_t,sn_thick,sn_voli,sn_volw,sn_volv               & !CRYOWRF
+     &          ,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers                  & !CRYOWRF
+     ! CRYOWRF budget arrays (OPTIONAL - for SNOWPACK physics)  
+     &          ,m_budg_precip,m_budg_sublim,m_budg_melt             & !CRYOWRF
+     &          ,e_budg_lw_in,e_budg_sensible,e_budg_latent          & !CRYOWRF
      &                                                             )
 
    USE module_state_description, ONLY : SFCLAYSCHEME              &
@@ -813,6 +819,29 @@ CONTAINS
    REAL, DIMENSION( ims:ime, jms:jme ) , OPTIONAL, INTENT(INOUT)::   BIO4    ! ssib-snow
    REAL, DIMENSION( ims:ime, jms:jme ) , OPTIONAL, INTENT(INOUT)::   BLO4    ! ssib-snow
    REAL, DIMENSION( ims:ime, jms:jme ) , OPTIONAL, INTENT(INOUT)::   HO4     ! ssib-snow
+
+! CRYOWRF layer arrays (OPTIONAL - for SNOWPACK physics)
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_T        ! layer temperature [K]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_THICK    ! layer thickness [m]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLI     ! ice volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLW     ! water volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLV     ! air volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RG       ! grain radius [mm]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RB       ! bond radius [mm]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_DD       ! dendricity [-]
+   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_SP       ! sphericity [-]
+   INTEGER, DIMENSION( ims:ime,     jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_NLAYERS  ! number of layers
+
+! CRYOWRF mass budget arrays (OPTIONAL - for SNOWPACK physics)
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_PRECIP   ! mass budget precip [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_SUBLIM   ! mass budget sublim [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_MELT     ! mass budget melt [kg m-2]
+
+! CRYOWRF energy budget arrays (OPTIONAL - for SNOWPACK physics)
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LW_IN    ! energy budget LW in [W m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_SENSIBLE ! energy budget sensible [W m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LATENT   ! energy budget latent [W m-2]
+
 !----------------------------------------------------------
    REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)::   BR
    REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)::   CHKLOWQ
@@ -4360,8 +4389,8 @@ CONTAINS
 
          CALL wrf_debug(100,'in SNOWPACK LSM')
          
-         ! Call SNOWPACK driver with simple interface - no CRYOWRF arrays passed
-         ! CRYOWRF arrays are OPTIONAL in the interface and will be handled internally
+         ! Call SNOWPACK driver with CRYOWRF arrays for layer diagnostics and budgets
+         ! Arrays are properly declared as OPTIONAL DUMMY parameters in both interfaces
          CALL snowpacklsm(itimestep,xlat,xlong,dz8w,dt,dx,               &
                ivgtyp,   isltyp,    xland,     xice,xice_threshold,       &
                t_phy,     qv_curr,     u_phy,    v_phy,   swdown,   glw,  &
@@ -4371,6 +4400,9 @@ CONTAINS
                sh2o,     tslb,     snow,     snowh,   canwat,    acsnom,  &
                acsnow,    emiss,     qsfc,                                 &
                z0,      znt,                                               &
+               sn_t,sn_thick,sn_voli,sn_volw,sn_volv,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers, &
+               m_budg_precip,m_budg_sublim,m_budg_melt,                   &
+               e_budg_lw_in,e_budg_sensible,e_budg_latent,                &
                ids,ide,  jds,jde,  kds,kde,                               &
                ims,ime,  jms,jme,  kms,kme,                               &
                i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte     )
