@@ -4,6 +4,7 @@
 ! WRF interface driver for SNOWPACK physics integration
 !
 MODULE module_sf_snowpackdrv
+    USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR
 
     ! Module-level configuration management
     LOGICAL, SAVE :: config_initialized = .false.

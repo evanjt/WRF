@@ -19,6 +19,7 @@
 #include "snowpack/snowpack/DataClasses.h"
 #include "snowpack/snowpack/SnowpackConfig.h"
 #include "snowpack/snowpack/snowpackCore/Snowpack.h"
+#include "snowpack/snowpack/plugins/SnowpackIO.h"
 
 // Configuration management
 class SnowpackConfigManager {
@@ -28,10 +29,12 @@ public:
     static std::string getDefaultConfigPath();
 };
 
-// Global configuration (shared, read-only)
+// Global configuration and I/O (shared, read-only)
 static std::unique_ptr<SnowpackConfig> global_config;
+static std::unique_ptr<SnowpackIO> global_snowpack_io;
 static bool config_initialized = false;
 static std::string config_file_path;
+static bool use_state_persistence = false;  // Enable .sno file persistence
 
 // SNOWPACK Configuration Constants
 namespace SnowpackConstants {
@@ -99,6 +102,18 @@ std::string SnowpackConfigManager::getDefaultConfigPath() {
     return "./io.ini";  // Default path in WRF run directory
 }
 
+// Helper functions for SNOWPACK state persistence
+std::string generateSnoFilename(int i, int j, int domain = 1) {
+    // Follow CRYOWRF naming convention: snpack_domain_j_i.sno
+    return "./snowpack_states/snpack_" + std::to_string(domain) + "_" + 
+           std::to_string(j) + "_" + std::to_string(i) + ".sno";
+}
+
+std::string generateStationID(int i, int j, int domain = 1) {
+    // Follow CRYOWRF station ID convention
+    return "snpack_" + std::to_string(domain) + "_" + std::to_string(j) + "_" + std::to_string(i);
+}
+
 // Function declarations
 void initialize_snowpack_config_with_path(const std::string& ini_path);
 
@@ -120,6 +135,10 @@ void initialize_snowpack_config_with_path(const std::string& ini_path) {
         
         // Create SnowpackConfig from file
         global_config = std::make_unique<SnowpackConfig>(file_config);
+        
+        // Create SnowpackIO instance for state persistence
+        global_snowpack_io = std::make_unique<SnowpackIO>(*global_config);
+        
         config_file_path = ini_path;
         config_initialized = true;
         
