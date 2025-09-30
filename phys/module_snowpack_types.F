@@ -174,6 +174,8 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     t_phy, qv_curr, u_phy, v_phy, p8w, swdown, glw, rainbl, &
     ! Grid information  
     xlat, xlong, dz8w, &
+    ! Model configuration
+    dt, itimestep, &
     ! Surface state (input/output)
     tsk, hfx, qfx, lh, albedo, snowc, snow, snowh, qsfc, z0, znt, &
     ! Grid indices
@@ -185,6 +187,8 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     REAL, INTENT(IN) :: t_phy, qv_curr, u_phy, v_phy, p8w
     REAL, INTENT(IN) :: swdown, glw, rainbl
     REAL, INTENT(IN) :: xlat, xlong, dz8w
+    REAL, INTENT(IN) :: dt
+    INTEGER, INTENT(IN) :: itimestep
     REAL, INTENT(INOUT) :: tsk, hfx, qfx, lh, albedo, snowc
     REAL, INTENT(INOUT) :: snow, snowh, qsfc, z0, znt
     INTEGER, INTENT(IN) :: i, j, k
@@ -214,6 +218,10 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     interface_data%surface%moisture_flux = qsfc
     interface_data%surface%roughness_mom = z0
     interface_data%surface%roughness_heat = znt
+    
+    ! Pack model configuration
+    interface_data%config%dt = dt
+    interface_data%config%timestep_number = itimestep
     
 END SUBROUTINE pack_wrf_to_interface
 

@@ -301,6 +301,10 @@ void initialize_snowpack_config_c(const char* ini_file_path) {
 void initialize_wrf_simulation_time_c(int start_year, int start_month, int start_day, 
                                       int start_hour, int start_minute) {
     try {
+        // Debug: Print received parameters
+        printf("SNOWPACK-DEBUG [C++]: Received parameters: year=%d, month=%d, day=%d, hour=%d, minute=%d\n",
+               start_year, start_month, start_day, start_hour, start_minute);
+        
         // Initialize simulation time with WRF namelist start time (CRYOWRF pattern)
         current_simulation_date = mio::Date(start_year, start_month, start_day, 
                                            start_hour, start_minute, 0.0, 0.0);
@@ -310,6 +314,8 @@ void initialize_wrf_simulation_time_c(int start_year, int start_month, int start
                current_simulation_date.toString(mio::Date::ISO).c_str());
     } catch (const std::exception& e) {
         printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Failed to initialize time: %s\n", e.what());
+        printf("SNOWPACK-DEBUG [C++]: Parameters were: year=%d, month=%d, day=%d, hour=%d, minute=%d\n",
+               start_year, start_month, start_day, start_hour, start_minute);
         std::abort();
     }
 }
@@ -395,8 +401,28 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
         std::abort();
     }
     
-    // Advance time with each timestep call (CRYOWRF pattern - line 862)
-    current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+    // CRYOWRF compute_counter pattern (lines 579, 862) - advance time conditionally
+    static int compute_counter_basic = 0;
+    static int call_counter_basic = 0;
+    static bool first_physics_call_basic = true;
+    
+    if (first_physics_call_basic) {
+        double wrf_dt = dt;  // WRF timestep in seconds
+        double snowpack_dt = calculation_step_length * 60.0;  // SNOWPACK timestep in seconds
+        compute_counter_basic = (int)(snowpack_dt / wrf_dt);
+        first_physics_call_basic = false;
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: compute_counter_basic = %d (snowpack_dt=%.1fs, wrf_dt=%.1fs)\n", 
+               compute_counter_basic, snowpack_dt, wrf_dt);
+    }
+    
+    call_counter_basic++;
+    
+    // Only advance time when counter matches (CRYOWRF pattern)
+    if ((call_counter_basic % compute_counter_basic) == 0) {
+        current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Time advanced to %s (call %d)\n", 
+               current_simulation_date.toString().c_str(), call_counter_basic);
+    }
     
     mio::Date current_time = current_simulation_date;  // Use advancing time
     
@@ -541,8 +567,28 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
         std::abort();
     }
     
-    // Advance time with each timestep call (CRYOWRF pattern - line 862)
-    current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+    // CRYOWRF compute_counter pattern (lines 579, 862) - advance time conditionally
+    static int compute_counter_layers = 0;
+    static int call_counter_layers = 0;
+    static bool first_physics_call_layers = true;
+    
+    if (first_physics_call_layers) {
+        double wrf_dt = dt;  // WRF timestep in seconds
+        double snowpack_dt = calculation_step_length * 60.0;  // SNOWPACK timestep in seconds
+        compute_counter_layers = (int)(snowpack_dt / wrf_dt);
+        first_physics_call_layers = false;
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: compute_counter_layers = %d (snowpack_dt=%.1fs, wrf_dt=%.1fs)\n", 
+               compute_counter_layers, snowpack_dt, wrf_dt);
+    }
+    
+    call_counter_layers++;
+    
+    // Only advance time when counter matches (CRYOWRF pattern)
+    if ((call_counter_layers % compute_counter_layers) == 0) {
+        current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Time advanced to %s (call %d)\n", 
+               current_simulation_date.toString().c_str(), call_counter_layers);
+    }
     
     mio::Date current_time = current_simulation_date;  // Use advancing time
     

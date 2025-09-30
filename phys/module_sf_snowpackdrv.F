@@ -45,9 +45,7 @@ SUBROUTINE initialize_snowpack_module_config()
     USE module_configure  ! For nl_get_* functions
     IMPLICIT NONE
     
-    ! Local variables for WRF namelist time values (CRYOWRF pattern)
-    INTEGER :: simulation_start_year, simulation_start_month, simulation_start_day
-    INTEGER :: simulation_start_hour, simulation_start_minute
+    ! Local variables for WRF namelist time values (CRYOWRF pattern)  
     INTEGER :: domain_id
     
     IF (config_initialized) RETURN
@@ -188,9 +186,22 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     
     ! Initialize WRF simulation time on first call (CRYOWRF pattern)
     IF (.NOT. time_initialized) THEN
-        ! Use proper domain ID from WRF (CRYOWRF pattern)
-        domain_id = INEST  ! Use the actual domain ID passed by WRF
+        ! Get domain ID from grid dimensions (WRF pattern)
+        ! For parent domain: ids=1, ide=230, so domain_id = 1
+        ! For nested domains: different ids values indicate different domains
+        IF (ids == 1) THEN
+            domain_id = 1  ! Parent domain
+        ELSE
+            ! For nested domains, use a simple mapping
+            ! This is a simplification - real CRYOWRF gets this as a parameter
+            domain_id = 1  ! Default to domain 1 for now
+        ENDIF
         
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: ========================================'
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: WRF TIME INITIALIZATION STARTING'
+        WRITE(*,'(A)') 'SNOWPACK-DEBUG: ========================================'
+        
+        WRITE(*,'(A,I6,A,I3)') 'SNOWPACK-DEBUG: Grid dimensions - ids=', ids, ', determined domain_id=', domain_id
         WRITE(*,'(A,I3,A,I6)') 'SNOWPACK-DEBUG: Starting time initialization for domain ', &
                                domain_id, ' at timestep ', itimestep
         
@@ -268,6 +279,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             SWDOWN(I,J), GLW(I,J), RAINBL(I,J), &
             ! Grid information  
             XLAT(I,J), XLONG(I,J), DZ8W(I,1,J), &
+            ! Model configuration
+            DT, ITIMESTEP, &
             ! Surface state (input/output)
             TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
             SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J), &
