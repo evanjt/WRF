@@ -20,7 +20,7 @@ MODULE module_sf_snowpackdrv
         SUBROUTINE initialize_wrf_simulation_time_c(start_year, start_month, start_day, &
             start_hour, start_minute) BIND(C, name='initialize_wrf_simulation_time_c')
             USE ISO_C_BINDING
-            INTEGER(C_INT), INTENT(IN) :: start_year, start_month, start_day, start_hour, start_minute
+            INTEGER(C_INT), VALUE :: start_year, start_month, start_day, start_hour, start_minute
         END SUBROUTINE initialize_wrf_simulation_time_c
         
         SUBROUTINE extract_snowpack_layers_c(i_grid, j_grid, &
@@ -172,8 +172,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     TYPE(SnowpackInterface) :: interface_data
     
     ! Time initialization variables (CRYOWRF pattern)
-    INTEGER, SAVE :: simulation_start_year, simulation_start_month, simulation_start_day
-    INTEGER, SAVE :: simulation_start_hour, simulation_start_minute
+    INTEGER(C_INT), SAVE :: simulation_start_year, simulation_start_month, simulation_start_day
+    INTEGER(C_INT), SAVE :: simulation_start_hour, simulation_start_minute
     LOGICAL, SAVE :: time_initialized = .FALSE.
     INTEGER :: domain_id
 
@@ -241,6 +241,10 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                                 ' final retrieved WRF namelist time: ', &
                                 simulation_start_year, simulation_start_month, simulation_start_day, &
                                 simulation_start_hour, simulation_start_minute
+                                
+        ! Debug: Check if we're dealing with addresses vs values
+        WRITE(*,'(A,Z0)') 'SNOWPACK-DEBUG: Address of simulation_start_year: ', LOC(simulation_start_year)
+        WRITE(*,'(A,I0)') 'SNOWPACK-DEBUG: Value of simulation_start_year: ', simulation_start_year
         
         ! Validate the retrieved values
         IF (simulation_start_year < 1900 .OR. simulation_start_year > 2100 .OR. &
