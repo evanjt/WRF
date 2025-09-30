@@ -45,13 +45,22 @@ SUBROUTINE initialize_snowpack_module_config()
     USE module_configure  ! For nl_get_* functions
     IMPLICIT NONE
     
-    ! Local variables for WRF namelist time values (CRYOWRF pattern)  
+    ! Local variables
+    CHARACTER(LEN=256) :: snowpack_config_path
     INTEGER :: domain_id
     
     IF (config_initialized) RETURN
     
-    ! Use default io.ini path
-    config_file_path = './io.ini'
+    ! Get SNOWPACK configuration file path from namelist
+    domain_id = 1  ! Default to domain 1 for initialization
+    CALL nl_get_snowpack_config_file(domain_id, snowpack_config_path)
+    
+    ! Use namelist-specified path or default
+    IF (LEN_TRIM(snowpack_config_path) > 0) THEN
+        config_file_path = TRIM(snowpack_config_path)
+    ELSE
+        config_file_path = './io.ini'
+    ENDIF
     
     ! Initialize SNOWPACK configuration with the file
     CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
@@ -62,7 +71,7 @@ SUBROUTINE initialize_snowpack_module_config()
     config_initialized = .true.
     
     ! Diagnostic message
-    CALL wrf_message('*** SNOWPACK LSM: Initialized with WRF namelist time (CRYOWRF pattern) ***')
+    CALL wrf_message('*** SNOWPACK LSM: Initialized with config file: ' // TRIM(config_file_path) // ' ***')
     
 END SUBROUTINE initialize_snowpack_module_config
 
@@ -176,6 +185,11 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     INTEGER(C_INT), SAVE :: simulation_start_hour, simulation_start_minute
     LOGICAL, SAVE :: time_initialized = .FALSE.
     INTEGER :: domain_id
+    
+    ! SNOWPACK namelist parameters
+    LOGICAL :: sn_start_from_file
+    REAL :: snpack_dt, snpack_write_dt
+    CHARACTER(LEN=256) :: snpack_mode
 
 !-------------------------------------------------------------------
 !  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
@@ -184,18 +198,22 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     ! Initialize SNOWPACK configuration on first call
     CALL initialize_snowpack_module_config()
     
+    ! Get domain ID from grid dimensions (WRF pattern)
+    IF (ids == 1) THEN
+        domain_id = 1  ! Parent domain
+    ELSE
+        ! For nested domains, use a simple mapping
+        domain_id = 1  ! Default to domain 1 for now
+    ENDIF
+    
+    ! Get SNOWPACK namelist parameters for this domain
+    CALL nl_get_sn_start_from_file(domain_id, sn_start_from_file)
+    CALL nl_get_snpack_dt(domain_id, snpack_dt)
+    CALL nl_get_snpack_write_dt(domain_id, snpack_write_dt)
+    CALL nl_get_snpack_mode(domain_id, snpack_mode)
+    
     ! Initialize WRF simulation time on first call (CRYOWRF pattern)
     IF (.NOT. time_initialized) THEN
-        ! Get domain ID from grid dimensions (WRF pattern)
-        ! For parent domain: ids=1, ide=230, so domain_id = 1
-        ! For nested domains: different ids values indicate different domains
-        IF (ids == 1) THEN
-            domain_id = 1  ! Parent domain
-        ELSE
-            ! For nested domains, use a simple mapping
-            ! This is a simplification - real CRYOWRF gets this as a parameter
-            domain_id = 1  ! Default to domain 1 for now
-        ENDIF
         
         WRITE(*,'(A)') 'SNOWPACK-DEBUG: ========================================'
         WRITE(*,'(A)') 'SNOWPACK-DEBUG: WRF TIME INITIALIZATION STARTING'
@@ -262,9 +280,13 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         time_initialized = .TRUE.
     ENDIF
     
-    ! Diagnostic message
+    ! Diagnostic message showing namelist parameters
     IF (itimestep == 1) THEN
         CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
+        WRITE(*,'(A,L1)') 'SNOWPACK-INFO: sn_start_from_file = ', sn_start_from_file
+        WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_dt = ', snpack_dt
+        WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_write_dt = ', snpack_write_dt
+        WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode)
     END IF
 
     ! Grid loop with structured data approach

@@ -7,15 +7,15 @@ rconfig   integer no_snpack_lay_to_sav    namelist,physics      1            50 
 dimspec    snpacky 2     namelist=no_snpack_lay_to_sav     z     snowpack_layers
 
 # Core SNOWPACK surface fluxes - replaces complex CRYOWRF outputs
-state    real   SNOWPACK_TSK      ij     misc        1         -     "SNOWPACK_TSK"      "SNOWPACK SURFACE TEMPERATURE"             "K"
-state    real   SNOWPACK_HFX      ij     misc        1         -     "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"  
-state    real   SNOWPACK_QFX      ij     misc        1         -     "SNOWPACK_QFX"      "SNOWPACK LATENT HEAT FLUX"                "kg m-2 s-1"
-state    real   SNOWPACK_LH       ij     misc        1         -     "SNOWPACK_LH"       "SNOWPACK LATENT HEAT FLUX"                "W m-2"
-state    real   SNOWPACK_ALBEDO   ij     misc        1         -     "SNOWPACK_ALBEDO"   "SNOWPACK SURFACE ALBEDO"                  "1"
-state    real   SNOWPACK_SNOWC    ij     misc        1         -     "SNOWPACK_SNOWC"    "SNOWPACK SNOW COVERAGE FRACTION"          "1"
-state    real   SNOWPACK_SNOW     ij     misc        1         -     "SNOWPACK_SNOW"     "SNOWPACK SNOW WATER EQUIVALENT"           "mm"
-state    real   SNOWPACK_SNOWH    ij     misc        1         -     "SNOWPACK_SNOWH"    "SNOWPACK SNOW DEPTH"                      "m"
-state    real   SNOWPACK_EMISS    ij     misc        1         -     "SNOWPACK_EMISS"    "SNOWPACK SURFACE EMISSIVITY"              "1"
+state    real   SNOWPACK_TSK      ij     misc        1         -     rh       "SNOWPACK_TSK"      "SNOWPACK SURFACE TEMPERATURE"             "K"
+state    real   SNOWPACK_HFX      ij     misc        1         -     rh       "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"  
+state    real   SNOWPACK_QFX      ij     misc        1         -     rh       "SNOWPACK_QFX"      "SNOWPACK LATENT HEAT FLUX"                "kg m-2 s-1"
+state    real   SNOWPACK_LH       ij     misc        1         -     rh       "SNOWPACK_LH"       "SNOWPACK LATENT HEAT FLUX"                "W m-2"
+state    real   SNOWPACK_ALBEDO   ij     misc        1         -     rh       "SNOWPACK_ALBEDO"   "SNOWPACK SURFACE ALBEDO"                  "1"
+state    real   SNOWPACK_SNOWC    ij     misc        1         -     rh       "SNOWPACK_SNOWC"    "SNOWPACK SNOW COVERAGE FRACTION"          "1"
+state    real   SNOWPACK_SNOW     ij     misc        1         -     rh       "SNOWPACK_SNOW"     "SNOWPACK SNOW WATER EQUIVALENT"           "mm"
+state    real   SNOWPACK_SNOWH    ij     misc        1         -     rh       "SNOWPACK_SNOWH"    "SNOWPACK SNOW DEPTH"                      "m"
+state    real   SNOWPACK_EMISS    ij     misc        1         -     rh       "SNOWPACK_EMISS"    "SNOWPACK SURFACE EMISSIVITY"              "1"
 
 # Essential diagnostic variables
 state    real   SNOWPACK_ACSNOM   ij     misc        1         -     "SNOWPACK_ACSNOM"   "ACCUMULATED SNOW MELT"                    "mm"
@@ -29,9 +29,13 @@ state    real   SNOWPACK_ALBEDO_TS ijkft  misc        1         -     "SNOWPACK_
 state    real   SNOWPACK_SNOW_TS  ijkft   misc        1         -     "SNOWPACK_SNOW_TS"  "SNOWPACK SWE TIMESERIES"                  "mm"
 state    real   SNOWPACK_SNOWH_TS ijkft   misc        1         -     "SNOWPACK_SNOWH_TS" "SNOWPACK DEPTH TIMESERIES"                "m"
 
-# Namelist parameters for SNOWPACK configuration
+# Namelist parameters for SNOWPACK configuration (CRYOWRF-compatible, without blowing snow)
 rconfig   integer sf_snowpack_physics    namelist,physics   1            0       -      "sf_snowpack_physics"    "SNOWPACK LAND SURFACE OPTION"
 rconfig   character snowpack_config_file namelist,physics   max_domains  "io.ini"  -    "snowpack_config_file"   "SNOWPACK CONFIGURATION FILE PATH"
+rconfig   logical sn_start_from_file      namelist,physics   max_domains  .false. irh    "sn_start_from_file"     "start SNOWPACK from .sno files"          ""
+rconfig   real    snpack_dt               namelist,physics   max_domains  900     irh    "snpack_dt"              "SNOWPACK timestep"                       "s"
+rconfig   real    snpack_write_dt         namelist,physics   max_domains  21600   irh    "snpack_write_dt"        "SNOWPACK write interval"                 "s"
+rconfig   character snpack_mode           namelist,physics   max_domains  "antarctica" -  "snpack_mode"           "SNOWPACK mode (antarctica/alps)"         ""
 
 # CRYOWRF-compatible snow layer arrays (without blowing snow complexity)
 state   real    sn_T     i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_T"      "snowpack layer temperature" "K"
