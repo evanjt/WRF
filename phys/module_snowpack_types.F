@@ -117,6 +117,7 @@ TYPE :: ModelConfig
     ! Grid indices for current call
     INTEGER :: i_start, i_end   ! I-dimension bounds
     INTEGER :: j_start, j_end   ! J-dimension bounds
+    INTEGER :: i_grid, j_grid   ! Current grid point indices
 END TYPE ModelConfig
 
 !-------------------------------------------------------------------
@@ -206,6 +207,13 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     interface_data%atmos%latitude = xlat
     interface_data%atmos%longitude = xlong
     
+    ! Debug first few grid points
+    IF (i <= 2 .AND. j <= 2) THEN
+        WRITE(*,'(A,I3,A,I3,A,F10.5,A,F10.5)') &
+            "SNOWPACK-DEBUG [pack_wrf_to_interface]: Grid(", i, ",", j, &
+            ") Packed lat=", xlat, " lon=", xlong
+    ENDIF
+    
     ! Pack current surface state
     interface_data%surface%snow_swe = snow
     interface_data%surface%snow_depth = snowh
@@ -222,6 +230,8 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     ! Pack model configuration
     interface_data%config%dt = dt
     interface_data%config%timestep_number = itimestep
+    interface_data%config%i_grid = i
+    interface_data%config%j_grid = j
     
 END SUBROUTINE pack_wrf_to_interface
 
@@ -325,8 +335,9 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     height = DBLE(interface_data%atmos%height)
     dt = DBLE(interface_data%config%dt)
     
-    i_grid = 1
-    j_grid = 1
+    ! Use actual grid indices passed in from WRF
+    i_grid = interface_data%config%i_grid
+    j_grid = interface_data%config%j_grid
     
     snow_swe = DBLE(interface_data%surface%snow_swe)
     snow_depth = DBLE(interface_data%surface%snow_depth)

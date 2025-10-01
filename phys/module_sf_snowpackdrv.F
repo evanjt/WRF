@@ -295,6 +295,12 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         ! Skip water points
         IF((XLAND(I,J)-1.5) >= 0.) CYCLE
         
+        ! Debug: Print first few grid points to understand coordinate values
+        IF (I <= 2 .AND. J <= 2) THEN
+            WRITE(*,'(A,I3,A,I3,A,F10.5,A,F10.5)') &
+                "SNOWPACK-DEBUG [Fortran]: Grid(", I, ",", J, ") XLAT=", XLAT(I,J), " XLONG=", XLONG(I,J)
+        ENDIF
+        
         ! Initialize interface structure
         CALL initialize_snowpack_interface(interface_data, itimestep, dt, dx)
         

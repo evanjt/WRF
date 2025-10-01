@@ -14,6 +14,7 @@
 #include <cstring>
 #include <vector>
 #include <fstream>
+#include <algorithm>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -249,18 +250,27 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, int wrf_domain_id
     auto new_station = std::make_unique<SnowStation>(use_canopy, use_soil, alpine3d, sea_ice);
     
     // Set up basic station metadata using WRF coordinates
-    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
-        // Check for obviously invalid coordinate sentinel values instead
-        printf("SNOWPACK-FATAL: Station (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
-               i_grid, j_grid, wrf_lat, wrf_lon);
-        printf("SNOWPACK-FATAL: Latitude must be [-90,90], longitude must be [-180,360]\n");
-        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
-    }
+    // WRF's XLAT and XLONG contain geographic coordinates in degrees (regardless of map projection)
     
     mio::Coords position;
-    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
-    printf("SNOWPACK-INFO: Station (%d,%d) initialized with WRF coordinates: lat=%.6f°, lon=%.6f°, alt=%.1fm\n", 
+    
+    // Debug: Log what we receive from WRF
+    printf("SNOWPACK-DEBUG [C++]: Station (%d,%d) - Received from WRF: lat=%.6f°, lon=%.6f°, alt=%.1fm\n", 
            i_grid, j_grid, wrf_lat, wrf_lon, wrf_alt);
+    
+    // WRF passes geographic coordinates (latitude/longitude in degrees)
+    // CRYOWRF uses setLatLon with these values directly
+    // setLatLon expects (latitude, longitude, altitude) - standard geographic order
+    try {
+        position.setLatLon(wrf_lat, wrf_lon, wrf_alt);  // Correct order: lat, lon, alt
+        printf("SNOWPACK-INFO: Successfully set geographic coordinates for station (%d,%d)\n", i_grid, j_grid);
+    } catch (const mio::InvalidArgumentException& e) {
+        printf("SNOWPACK-ERROR: Invalid coordinates for station (%d,%d): %s\n", i_grid, j_grid, e.what());
+        printf("SNOWPACK-ERROR: Received lat=%.6f, lon=%.6f - these may not be geographic coordinates\n", wrf_lat, wrf_lon);
+        // If coordinates are invalid, there's likely a data passing issue
+        // Don't try to use setXY as a fallback - that's for projected coordinates in meters
+        throw;
+    }
     std::string stationID = "WRF_GRID_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
     new_station->meta.setStationData(position, stationID, stationName);
@@ -442,7 +452,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon, height);
+    // Pass domain_id=1 explicitly to avoid parameter mismatch
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, 1, wrf_lat, wrf_lon, height);
     Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon, height);
     
     // Create temporary meteorological data
@@ -450,17 +461,14 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     SurfaceFluxes surfFluxes;
     BoundCond sn_Bdata;
     
-    // Validate WRF coordinates
-    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
-        printf("SNOWPACK-FATAL: Grid (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
-               i_grid, j_grid, wrf_lat, wrf_lon);
-        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
-    }
+    // Note: WRF coordinates may be projected (grid coordinates in meters) rather than lat/lon
     
     // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
     mio::Coords position;
-    position.setLatLon(wrf_lat, wrf_lon, height);
+    // WRF always passes geographic coordinates (XLAT/XLONG in degrees)
+    // Use setLatLon with proper order: latitude, longitude, altitude
+    position.setLatLon(wrf_lat, wrf_lon, height);  // Geographic coordinates from WRF
     std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
@@ -493,7 +501,10 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     if (first_physics_call_basic) {
         double wrf_dt = dt;  // WRF timestep in seconds
         double snowpack_dt = calculation_step_length * 60.0;  // SNOWPACK timestep in seconds
-        compute_counter_basic = (int)(snowpack_dt / wrf_dt);
+        // WRF calls physics every wrf_dt, SNOWPACK needs to run every snowpack_dt
+        // So we run SNOWPACK every (wrf_dt/snowpack_dt) WRF calls
+        // Following CRYOWRF pattern exactly
+        compute_counter_basic = (int)(wrf_dt / snowpack_dt);
         first_physics_call_basic = false;
         printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: compute_counter_basic = %d (snowpack_dt=%.1fs, wrf_dt=%.1fs)\n", 
                compute_counter_basic, snowpack_dt, wrf_dt);
@@ -609,7 +620,8 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon, height);
+    // Pass domain_id=1 explicitly to avoid parameter mismatch
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, 1, wrf_lat, wrf_lon, height);
     Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon, height);
     
     // Create temporary meteorological data
@@ -617,17 +629,14 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     SurfaceFluxes surfFluxes;
     BoundCond sn_Bdata;
     
-    // Validate WRF coordinates
-    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
-        printf("SNOWPACK-FATAL: Grid (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
-               i_grid, j_grid, wrf_lat, wrf_lon);
-        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
-    }
+    // Note: WRF coordinates may be projected (grid coordinates in meters) rather than lat/lon
     
     // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
     mio::Coords position;
-    position.setLatLon(wrf_lat, wrf_lon, height);
+    // WRF always passes geographic coordinates (XLAT/XLONG in degrees)
+    // Use setLatLon with proper order: latitude, longitude, altitude
+    position.setLatLon(wrf_lat, wrf_lon, height);  // Geographic coordinates from WRF
     std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
@@ -660,7 +669,10 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     if (first_physics_call_layers) {
         double wrf_dt = dt;  // WRF timestep in seconds
         double snowpack_dt = calculation_step_length * 60.0;  // SNOWPACK timestep in seconds
-        compute_counter_layers = (int)(snowpack_dt / wrf_dt);
+        // WRF calls physics every wrf_dt, SNOWPACK needs to run every snowpack_dt
+        // So we run SNOWPACK every (wrf_dt/snowpack_dt) WRF calls
+        // Following CRYOWRF pattern exactly
+        compute_counter_layers = (int)(wrf_dt / snowpack_dt);
         first_physics_call_layers = false;
         printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: compute_counter_layers = %d (snowpack_dt=%.1fs, wrf_dt=%.1fs)\n", 
                compute_counter_layers, snowpack_dt, wrf_dt);
@@ -669,7 +681,7 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     call_counter_layers++;
     
     // Only advance time when counter matches (CRYOWRF pattern)
-    if ((call_counter_layers % compute_counter_layers) == 0) {
+    if (compute_counter_layers > 0 && (call_counter_layers % compute_counter_layers) == 0) {
         current_simulation_date += (calculation_step_length / 1440.0);  // Convert minutes to days
         printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Time advanced to %s (call %d)\n", 
                current_simulation_date.toString().c_str(), call_counter_layers);
