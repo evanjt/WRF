@@ -457,8 +457,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon);
-    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon);
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon, height);
+    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon, height);
     
     // Create temporary meteorological data
     CurrentMeteo Mdata;
@@ -475,7 +475,7 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
     mio::Coords position;
-    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
+    position.setLatLon(wrf_lat, wrf_lon, height);
     std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
@@ -624,8 +624,8 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon);
-    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon);
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon, height);
+    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon, height);
     
     // Create temporary meteorological data
     CurrentMeteo Mdata;
@@ -642,7 +642,7 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
     mio::Coords position;
-    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
+    position.setLatLon(wrf_lat, wrf_lon, height);
     std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
