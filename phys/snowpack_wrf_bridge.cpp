@@ -267,7 +267,9 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 
     // Try to load existing .sno file state (CRYOWRF pattern)
     bool loaded_from_file = false;
     if (global_snowpack_io) {
-        std::string sno_filename = "snowpack_states/" + stationID + ".sno";
+        // CRYOWRF C++ naming pattern: snpack_{grid_id}_{I}_{J}.sno (from Coupler.cpp line 613)
+        // grid_id=1 (domain), I,J are WRF grid indices (no +1 needed)
+        std::string sno_filename = "./input/snpack_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
         try {
             // Attempt to read existing snowpack state
             SN_SNOWSOIL_DATA ssdata;
@@ -333,7 +335,9 @@ void save_snowstation_state(int i_grid, int j_grid) {
     
     if (station_it != grid_snowstations.end()) {
         std::string stationID = "WRF_GRID_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
-        std::string sno_filename = "snowpack_states/" + stationID + ".sno";
+        // CRYOWRF output naming: SNOWPATH directory with stationID.sno format
+        // This follows SNOWPACK configuration SNOWPATH = ./snowpack_states
+        std::string sno_filename = "./snowpack_states/" + stationID + ".sno";
         
         try {
             // Save snowpack state to .sno file (CRYOWRF pattern)
