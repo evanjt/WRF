@@ -264,7 +264,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
         SUBROUTINE snowpack_physics_layers_c( &
             temp_air, humidity, wind_speed, wind_dir, &
             shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-            i_grid, j_grid, &
+            i_grid, j_grid, wrf_lat, wrf_lon, &
             snow_swe, snow_depth, surface_temp, &
             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
             n_layers, &
@@ -277,6 +277,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
           REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
           REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
           INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid, j_grid
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: wrf_lat, wrf_lon
           
           REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
           REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
@@ -333,7 +334,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     ! Call SNOWPACK physics with layer extraction
     CALL snowpack_physics_layers_c(temp_air, humidity, wind_speed, wind_dir, &
                                    shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-                                   i_grid, j_grid, &
+                                   i_grid, j_grid, DBLE(interface_data%atmos%latitude), DBLE(interface_data%atmos%longitude), &
                                    snow_swe, snow_depth, surface_temp, &
                                    heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
                                    n_layers, &

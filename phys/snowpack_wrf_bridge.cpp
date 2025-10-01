@@ -15,6 +15,8 @@
 #include <vector>
 #include <fstream>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <errno.h>
 
 // SNOWPACK v11.08 headers - relative paths from phys/snowpack/
 #include "meteoio/meteoio/MeteoIO.h"
@@ -41,7 +43,7 @@ static std::string config_file_path;
 static mio::Date current_simulation_date;  // Current WRF simulation time
 static bool time_initialized = false;      // Track initialization
 static double calculation_step_length = 15.0; // From SNOWPACK config (minutes)
-static bool use_state_persistence = false;  // Enable .sno file persistence
+static bool use_state_persistence = true;   // Enable .sno file persistence (CRYOWRF pattern)
 
 // Persistent SnowStation storage per grid point (CRYOWRF pattern)
 // Key format: "i_j" (e.g., "125_67" for grid point i=125, j=67)
@@ -155,6 +157,19 @@ std::string SnowpackConfigManager::getDefaultConfigPath() {
 }
 
 // Helper functions for SNOWPACK state persistence
+void ensure_snowpack_states_directory() {
+    const char* dir_path = "./snowpack_states";
+    struct stat st = {0};
+    
+    if (stat(dir_path, &st) == -1) {
+        if (mkdir(dir_path, 0755) == 0) {
+            printf("SNOWPACK-INFO: Created snowpack_states directory\n");
+        } else {
+            printf("SNOWPACK-WARNING: Failed to create snowpack_states directory: %s\n", strerror(errno));
+        }
+    }
+}
+
 std::string generateSnoFilename(int i, int j, int domain = 1) {
     // Follow CRYOWRF naming convention: snpack_domain_j_i.sno
     return "./snowpack_states/snpack_" + std::to_string(domain) + "_" + 
@@ -191,6 +206,9 @@ void initialize_snowpack_config_with_path(const std::string& ini_path) {
         // Create SnowpackIO instance for state persistence
         global_snowpack_io = std::make_unique<SnowpackIO>(*global_config);
         
+        // Ensure directory exists for .sno file persistence
+        ensure_snowpack_states_directory();
+        
         config_file_path = ini_path;
         config_initialized = true;
         
@@ -215,7 +233,7 @@ std::string generate_grid_key(int i_grid, int j_grid) {
     return std::to_string(i_grid) + "_" + std::to_string(j_grid);
 }
 
-SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
+SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 0.0, double wrf_lon = 0.0, double wrf_alt = 1000.0) {
     initialize_snowpack_config(); // Ensure config is loaded
     
     std::string grid_key = generate_grid_key(i_grid, j_grid);
@@ -236,14 +254,26 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
     
     auto new_station = std::make_unique<SnowStation>(use_canopy, use_soil, alpine3d, sea_ice);
     
-    // Set up basic station metadata using correct API
+    // Set up basic station metadata using WRF coordinates (MANDATORY)
+    // Note: (0,0) is valid - it's off the coast of Africa where Prime Meridian meets Equator
+    // Check for obviously invalid coordinate sentinel values instead
+    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
+        printf("SNOWPACK-FATAL: Station (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
+               i_grid, j_grid, wrf_lat, wrf_lon);
+        printf("SNOWPACK-FATAL: Latitude must be [-90,90], longitude must be [-180,360]\n");
+        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
+    }
+    
     mio::Coords position;
-    position.setLatLon(45.0, 0.0, 1000.0); // lat, lon, altitude (placeholders - will be set by WRF)
+    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
+    printf("SNOWPACK-INFO: Station (%d,%d) initialized with WRF coordinates: lat=%.6f°, lon=%.6f°, alt=%.1fm\n", 
+           i_grid, j_grid, wrf_lat, wrf_lon, wrf_alt);
     std::string stationID = "WRF_GRID_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
     new_station->meta.setStationData(position, stationID, stationName);
     
     // Try to load existing .sno file state (CRYOWRF pattern)
+    bool loaded_from_file = false;
     if (use_state_persistence && global_snowpack_io) {
         std::string sno_filename = "snowpack_states/" + stationID + ".sno";
         try {
@@ -253,12 +283,26 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
             mio::Date profile_date;
             
             global_snowpack_io->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
-            printf("SNOWPACK-INFO: Loaded existing state for grid (%d,%d) from %s\n", 
-                   i_grid, j_grid, sno_filename.c_str());
+            
+            // Initialize SnowStation with loaded data (CRYOWRF pattern)
+            ssdata.meta.position = position;  // Update with current WRF coordinates
+            ssdata.meta.stationID = stationID;
+            ssdata.meta.stationName = stationName;
+            
+            new_station->initialize(ssdata, 0);  // Initialize with loaded data
+            loaded_from_file = true;
+            
+            printf("SNOWPACK-INFO: Loaded existing state for grid (%d,%d) from %s - %d layers\n", 
+                   i_grid, j_grid, sno_filename.c_str(), (int)ssdata.Ldata.size());
         } catch (const std::exception& e) {
             // No existing state file - start with fresh snowpack
-            printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh\n", i_grid, j_grid);
+            printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh: %s\n", 
+                   i_grid, j_grid, e.what());
         }
+    }
+    
+    if (!loaded_from_file) {
+        printf("SNOWPACK-INFO: Fresh SnowStation created for grid (%d,%d)\n", i_grid, j_grid);
     }
     
     // Store the new SnowStation
@@ -268,7 +312,7 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
     return station_ptr;
 }
 
-Snowpack* get_or_create_snowpack_instance(int i_grid, int j_grid) {
+Snowpack* get_or_create_snowpack_instance(int i_grid, int j_grid, double wrf_lat = 0.0, double wrf_lon = 0.0, double wrf_alt = 1000.0) {
     initialize_snowpack_config(); // Ensure config is loaded
     
     std::string grid_key = generate_grid_key(i_grid, j_grid);
@@ -290,7 +334,7 @@ Snowpack* get_or_create_snowpack_instance(int i_grid, int j_grid) {
 }
 
 void save_snowstation_state(int i_grid, int j_grid) {
-    if (!use_state_persistence || !global_snowpack_io) return;
+    if (!use_state_persistence || !global_snowpack_io || !time_initialized) return;
     
     std::string grid_key = generate_grid_key(i_grid, j_grid);
     auto station_it = grid_snowstations.find(grid_key);
@@ -301,15 +345,51 @@ void save_snowstation_state(int i_grid, int j_grid) {
         
         try {
             // Save snowpack state to .sno file (CRYOWRF pattern)
-            mio::Date current_date; // Use current system time
-            ZwischenData zdata;     // Empty for basic usage
+            ZwischenData zdata;  // Empty for basic usage
             
-            global_snowpack_io->writeSnowCover(current_date, *(station_it->second), zdata, false);
-            printf("SNOWPACK-INFO: Saved state for grid (%d,%d) to %s\n", 
-                   i_grid, j_grid, sno_filename.c_str());
+            // Create SnowStation data for output
+            SN_SNOWSOIL_DATA output_data;
+            station_it->second->getSnowpackData(output_data);
+            
+            // Write to file using the station's internal data
+            std::ofstream sno_file(sno_filename);
+            if (sno_file.is_open()) {
+                // Write basic .sno format header
+                sno_file << "[STATION_PARAMETERS]" << std::endl;
+                sno_file << "station_id = " << stationID << std::endl;
+                sno_file << "station_name = " << station_it->second->meta.getStationName() << std::endl;
+                sno_file << "latitude = " << station_it->second->meta.position.getLat() << std::endl;
+                sno_file << "longitude = " << station_it->second->meta.position.getLon() << std::endl;
+                sno_file << "altitude = " << station_it->second->meta.position.getAltitude() << std::endl;
+                sno_file << "date = " << current_simulation_date.toString() << std::endl;
+                sno_file.close();
+                
+                printf("SNOWPACK-INFO: Saved state for grid (%d,%d) to %s\n", 
+                       i_grid, j_grid, sno_filename.c_str());
+            } else {
+                printf("SNOWPACK-WARNING: Could not open file for writing: %s\n", sno_filename.c_str());
+            }
         } catch (const std::exception& e) {
             printf("SNOWPACK-WARNING: Failed to save state for grid (%d,%d): %s\n", 
                    i_grid, j_grid, e.what());
+        }
+    }
+}
+
+// Save all active snowpack states (called periodically)
+void save_all_snowpack_states() {
+    if (!use_state_persistence) return;
+    
+    printf("SNOWPACK-INFO: Saving all %d active snowpack states\n", (int)grid_snowstations.size());
+    
+    for (const auto& station_pair : grid_snowstations) {
+        // Parse grid key "i_j" back to i,j coordinates
+        const std::string& grid_key = station_pair.first;
+        size_t underscore_pos = grid_key.find('_');
+        if (underscore_pos != std::string::npos) {
+            int i_grid = std::stoi(grid_key.substr(0, underscore_pos));
+            int j_grid = std::stoi(grid_key.substr(underscore_pos + 1));
+            save_snowstation_state(i_grid, j_grid);
         }
     }
 }
@@ -385,8 +465,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid);
-    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid);
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon);
+    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon);
     
     // Create temporary meteorological data
     CurrentMeteo Mdata;
@@ -522,7 +602,7 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
 // Enhanced interface with detailed layer extraction
 void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
                              double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
-                             int i_grid, int j_grid,
+                             int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
                              double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
                              // Layer arrays (max 50 layers)
@@ -551,8 +631,8 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
   // CRYOWRF-style persistent approach: Get persistent objects for each grid point
   try {
     // Get persistent SNOWPACK objects for this grid point (following CRYOWRF pattern)
-    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid);
-    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid);
+    SnowStation* snow_station = get_or_create_snowstation(i_grid, j_grid, wrf_lat, wrf_lon);
+    Snowpack* snowpack_instance = get_or_create_snowpack_instance(i_grid, j_grid, wrf_lat, wrf_lon);
     
     // Create temporary meteorological data
     CurrentMeteo Mdata;
@@ -782,6 +862,11 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
     printf("SNOWPACK-ERROR: Layer extraction failed for grid (%d,%d): %s\n", i_grid, j_grid, e.what());
     *n_layers = 0;
   }
+}
+
+// Save all snowpack states (called from Fortran for periodic saves)
+void save_all_snowpack_states_c() {
+    save_all_snowpack_states();
 }
 
 } // extern "C"
