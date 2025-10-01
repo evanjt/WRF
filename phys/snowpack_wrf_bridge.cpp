@@ -42,7 +42,7 @@ static std::string config_file_path;
 // Global time management (CRYOWRF pattern)
 static mio::Date current_simulation_date;  // Current WRF simulation time
 static bool time_initialized = false;      // Track initialization
-static double calculation_step_length = 15.0; // From SNOWPACK config (minutes)
+static double calculation_step_length = 0.0;  // Read from SNOWPACK config (minutes)
 static bool use_state_persistence = true;   // Enable .sno file persistence (CRYOWRF pattern)
 
 // Persistent SnowStation storage per grid point (CRYOWRF pattern)
@@ -51,23 +51,13 @@ static std::map<std::string, std::unique_ptr<SnowStation>> grid_snowstations;
 static std::map<std::string, std::unique_ptr<Snowpack>> grid_snowpack_instances;
 static bool persistent_objects_initialized = false;
 
-// SNOWPACK Configuration Constants
 namespace SnowpackConstants {
-  // Timestep configuration
-  constexpr double CALCULATION_STEP_MINUTES = 15.0;  // WRF coupling timestep [minutes]
-  
   // Temperature sanity checks [K] - prevents solver instabilities
-  // These match SNOWPACK's T_CRAZY_MAX/MIN from SnowpackAdvanced section
-  constexpr double T_CRAZY_MAX_KELVIN = 400.0;      // Maximum reasonable temperature (127°C)
-  constexpr double T_CRAZY_MIN_KELVIN = 100.0;      // Minimum reasonable temperature (-173°C)
+  constexpr double T_CRAZY_MAX_KELVIN = 400.0;  // 127°C
+  constexpr double T_CRAZY_MIN_KELVIN = 100.0;  // -173°C
   
   // Default station metadata
   const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
-  constexpr double DEFAULT_LATITUDE = 46.0;          // Default latitude for physics [degrees N]
-  constexpr double DEFAULT_LONGITUDE = 8.0;          // Default longitude for physics [degrees E]
-  
-  // Fallback roughness length if not in config (following CRYOWRF pattern)
-  constexpr double ROUGHNESS_LENGTH_FALLBACK = 0.01;  // Surface roughness length [m]
 }
 
 // SnowpackConfigManager implementation
@@ -217,8 +207,11 @@ void initialize_snowpack_config_with_path(const std::string& ini_path) {
         file_config.getValue("CALCULATION_STEP_LENGTH", "Snowpack", calc_step);
         file_config.getValue("SNP_SOIL", "Snowpack", snp_soil);
         
-        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Configured from %s - Timestep: %s min, SNP_SOIL: %s\n", 
-               ini_path.c_str(), calc_step.c_str(), snp_soil.c_str());
+        // Update global calculation step length from config (no hardcoded values)
+        calculation_step_length = std::stod(calc_step);
+        
+        printf("SNOWPACK-INFO [C++/snowpack_wrf_bridge.cpp]: Configured from %s - Timestep: %.1f min, SNP_SOIL: %s\n", 
+               ini_path.c_str(), calculation_step_length, snp_soil.c_str());
                
     } catch (const std::exception& e) {
         printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Configuration failed for %s: %s\n", 
@@ -254,10 +247,9 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 
     
     auto new_station = std::make_unique<SnowStation>(use_canopy, use_soil, alpine3d, sea_ice);
     
-    // Set up basic station metadata using WRF coordinates (MANDATORY)
-    // Note: (0,0) is valid - it's off the coast of Africa where Prime Meridian meets Equator
-    // Check for obviously invalid coordinate sentinel values instead
+    // Set up basic station metadata using WRF coordinates
     if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
+        // Check for obviously invalid coordinate sentinel values instead
         printf("SNOWPACK-FATAL: Station (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
                i_grid, j_grid, wrf_lat, wrf_lon);
         printf("SNOWPACK-FATAL: Latitude must be [-90,90], longitude must be [-180,360]\n");
@@ -439,7 +431,7 @@ void get_snowpack_config_path_c(char* path_buffer, int buffer_size) {
 
 void snowpack_physics(double temp_air, double humidity, double wind_speed, double wind_dir,
                       double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
-                      int i_grid, int j_grid,
+                      int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                       double* snow_swe, double* snow_depth, double* surface_temp,
                       double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage) {
   
@@ -473,26 +465,27 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     SurfaceFluxes surfFluxes;
     BoundCond sn_Bdata;
     
-    // Initialize snow station for this call
+    // Validate WRF coordinates
+    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
+        printf("SNOWPACK-FATAL: Grid (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
+               i_grid, j_grid, wrf_lat, wrf_lon);
+        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
+    }
+    
+    // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
-    ssdata.meta.stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
+    mio::Coords position;
+    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
+    std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
+    ssdata.meta.setStationData(position, stationID, stationName);
     
-    // Set position with default coordinates (SNOWPACK needs valid lat/lon)
-    ssdata.meta.position.setLatLon(SnowpackConstants::DEFAULT_LATITUDE, 
-                                   SnowpackConstants::DEFAULT_LONGITUDE,
-                                   height);
-    
-    ssdata.Height = height;
-    ssdata.nN = 1;       // Start with 1 node (ground only)  
-    ssdata.nLayers = 0;  // No snow/soil layers initially (SNP_SOIL = FALSE)
-    
-    // Initialize surface properties
-    ssdata.Albedo = 0.85;   // Default snow albedo
-    ssdata.SoilAlb = 0.2;   // Default soil albedo
-    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_FALLBACK;
-    ssdata.HS_last = 0.0;   // No previous snow height
-    ssdata.Ldata.clear();   // No layer data (matches nLayers = 0)
+    // Set only essential structural data (SNOWPACK constructor handles surface properties)
+    ssdata.Height = height;    // Station elevation [m]
+    ssdata.nN = 1;            // Start with 1 node (ground only)  
+    ssdata.nLayers = 0;       // No snow/soil layers initially
+    // HS_last, Ldata, and all surface properties use constructor defaults
     
     // Initialize station (only if it's a new station without existing state)
     if (snow_station->getNumberOfElements() == 0) {
@@ -639,26 +632,27 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     SurfaceFluxes surfFluxes;
     BoundCond sn_Bdata;
     
-    // Initialize snow station for this call
+    // Validate WRF coordinates
+    if (wrf_lat < -90.0 || wrf_lat > 90.0 || wrf_lon < -180.0 || wrf_lon > 360.0) {
+        printf("SNOWPACK-FATAL: Grid (%d,%d) - Invalid WRF coordinates! lat=%.6f, lon=%.6f\n", 
+               i_grid, j_grid, wrf_lat, wrf_lon);
+        throw std::runtime_error("WRF coordinates are outside valid Earth coordinate ranges");
+    }
+    
+    // Initialize snow station data with WRF coordinates
     SN_SNOWSOIL_DATA ssdata;
-    ssdata.meta.stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
+    mio::Coords position;
+    position.setLatLon(wrf_lat, wrf_lon, wrf_alt);
+    std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + 
                            std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    std::string stationName = "WRF Grid Point " + std::to_string(i_grid) + "," + std::to_string(j_grid);
+    ssdata.meta.setStationData(position, stationID, stationName);
     
-    // Set position with default coordinates
-    ssdata.meta.position.setLatLon(SnowpackConstants::DEFAULT_LATITUDE, 
-                                   SnowpackConstants::DEFAULT_LONGITUDE,
-                                   height);
-    
-    ssdata.Height = height;
-    ssdata.nN = 1;       // Start with 1 node (ground only)  
-    ssdata.nLayers = 0;  // No snow/soil layers initially
-    
-    // Initialize surface properties
-    ssdata.Albedo = 0.85;   // Default snow albedo
-    ssdata.SoilAlb = 0.2;   // Default soil albedo
-    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_FALLBACK;
-    ssdata.HS_last = 0.0;   // No previous snow height
-    ssdata.Ldata.clear();   // No layer data
+    // Set only essential structural data (SNOWPACK constructor handles surface properties)
+    ssdata.Height = height;    // Station elevation [m]
+    ssdata.nN = 1;            // Start with 1 node (ground only)  
+    ssdata.nLayers = 0;       // No snow/soil layers initially
+    // HS_last, Ldata, and all surface properties use constructor defaults
     
     // Initialize station (only if it's a new station without existing state)
     if (snow_station->getNumberOfElements() == 0) {
