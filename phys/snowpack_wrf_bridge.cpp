@@ -13,6 +13,8 @@
 #include <string>
 #include <cstring>
 #include <vector>
+#include <fstream>
+#include <unistd.h>
 
 // SNOWPACK v11.08 headers - relative paths from phys/snowpack/
 #include "meteoio/meteoio/MeteoIO.h"
@@ -52,16 +54,8 @@ namespace SnowpackConstants {
   // Timestep configuration
   constexpr double CALCULATION_STEP_MINUTES = 15.0;  // WRF coupling timestep [minutes]
   
-  // Meteorological measurement heights [m]
-  constexpr int METEO_HEIGHT_METERS = 30;           // Height of meteorological measurements
-  constexpr int WIND_HEIGHT_METERS = 30;            // Height of wind measurements
-  
-  // Surface properties
-  constexpr double ROUGHNESS_LENGTH_METERS = 0.01;  // Surface roughness length [m]
-  constexpr double GEO_HEAT_FLUX = 0.06;            // Geothermal heat flux [W/m²]
-  constexpr int CANOPY_NONE = 0;                     // No canopy model
-  
   // Temperature sanity checks [K] - prevents solver instabilities
+  // These match SNOWPACK's T_CRAZY_MAX/MIN from SnowpackAdvanced section
   constexpr double T_CRAZY_MAX_KELVIN = 400.0;      // Maximum reasonable temperature (127°C)
   constexpr double T_CRAZY_MIN_KELVIN = 100.0;      // Minimum reasonable temperature (-173°C)
   
@@ -69,13 +63,40 @@ namespace SnowpackConstants {
   const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
   constexpr double DEFAULT_LATITUDE = 46.0;          // Default latitude for physics [degrees N]
   constexpr double DEFAULT_LONGITUDE = 8.0;          // Default longitude for physics [degrees E]
+  
+  // Fallback roughness length if not in config (following CRYOWRF pattern)
+  constexpr double ROUGHNESS_LENGTH_FALLBACK = 0.01;  // Surface roughness length [m]
 }
 
 // SnowpackConfigManager implementation
 mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file_path) {
     try {
+        // Check if file exists first
+        std::ifstream test_file(ini_file_path);
+        if (!test_file.good()) {
+            char cwd[1024];
+            getcwd(cwd, sizeof(cwd));
+            printf("SNOWPACK-ERROR: io.ini file not found at: %s\n", ini_file_path.c_str());
+            printf("SNOWPACK-ERROR: Current working directory: %s\n", cwd);
+            throw std::runtime_error("io.ini file not found");
+        }
+        test_file.close();
+        
         // Load configuration from file
         mio::Config config(ini_file_path);
+        
+        // Verify we can read critical parameters (diagnostic check)
+        try {
+            bool canopy_test;
+            config.getValue("CANOPY", "Snowpack", canopy_test);
+            printf("SNOWPACK-INFO: Successfully read CANOPY = %s from [Snowpack] section\n", 
+                   canopy_test ? "true" : "false");
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-ERROR: Cannot read CANOPY from [Snowpack] section: %s\n", e.what());
+            printf("SNOWPACK-ERROR: Check that io.ini contains [Snowpack] section with CANOPY parameter\n");
+            printf("SNOWPACK-ERROR: File path: %s\n", ini_file_path.c_str());
+            throw;
+        }
         
         // CRYOWRF compatibility: Calculate METEO_STEP_LENGTH from CALCULATION_STEP_LENGTH
         // Following exact CRYOWRF pattern: meteo_step_length = M_TO_S(calculation_step_length)
@@ -98,12 +119,19 @@ mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file
 }
 
 void SnowpackConfigManager::validateConfiguration(const mio::Config& cfg) {
-    // Check for essential SNOWPACK parameters
+    // Check for essential SNOWPACK parameters that will be read by SNOWPACK components
     std::vector<std::pair<std::string, std::string>> required_params = {
         {"CALCULATION_STEP_LENGTH", "Snowpack"},
         {"FORCING", "Snowpack"},
         {"SNP_SOIL", "Snowpack"},
         {"SOIL_FLUX", "Snowpack"},
+        {"CANOPY", "Snowpack"},                // Required by Snowpack.cc:174
+        {"HEIGHT_OF_METEO_VALUES", "Snowpack"}, // Required by Snowpack.cc:179
+        {"HEIGHT_OF_WIND_VALUE", "Snowpack"},   // Required by Meteo.cc:56
+        {"ROUGHNESS_LENGTH", "Snowpack"},       // Required by Meteo.cc:50
+        {"SW_MODE", "Snowpack"},                // Common requirement
+        {"ATMOSPHERIC_STABILITY", "Snowpack"},  // Required by Meteo.cc:44
+        {"GEO_HEAT", "Snowpack"},              // Required for energy balance
         {"VARIANT", "SnowpackAdvanced"}
     };
     
@@ -199,12 +227,10 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid) {
     }
     
     // Create new SnowStation for this grid point - read configuration for correct parameters
-    int canopy_value;
-    bool use_soil;
-    global_config->getValue("CANOPY", "Snowpack", canopy_value);
+    // MeteoIO handles boolean parsing - accepts false/FALSE/0 or true/TRUE/1
+    bool use_canopy, use_soil;
+    global_config->getValue("CANOPY", "Snowpack", use_canopy);
     global_config->getValue("SNP_SOIL", "Snowpack", use_soil);
-    
-    const bool use_canopy = (canopy_value != 0);
     const bool alpine3d = false; // WRF integration, not Alpine3D
     const bool sea_ice = false;  // Standard snowpack mode
     
@@ -384,7 +410,7 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     // Initialize surface properties
     ssdata.Albedo = 0.85;   // Default snow albedo
     ssdata.SoilAlb = 0.2;   // Default soil albedo
-    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_METERS;
+    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_FALLBACK;
     ssdata.HS_last = 0.0;   // No previous snow height
     ssdata.Ldata.clear();   // No layer data (matches nLayers = 0)
     
@@ -550,7 +576,7 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     // Initialize surface properties
     ssdata.Albedo = 0.85;   // Default snow albedo
     ssdata.SoilAlb = 0.2;   // Default soil albedo
-    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_METERS;
+    ssdata.BareSoil_z0 = SnowpackConstants::ROUGHNESS_LENGTH_FALLBACK;
     ssdata.HS_last = 0.0;   // No previous snow height
     ssdata.Ldata.clear();   // No layer data
     
