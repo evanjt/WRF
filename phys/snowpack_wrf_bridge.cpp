@@ -43,7 +43,7 @@ static std::string config_file_path;
 static mio::Date current_simulation_date;  // Current WRF simulation time
 static bool time_initialized = false;      // Track initialization
 static double calculation_step_length = 0.0;  // Read from SNOWPACK config (minutes)
-static bool use_state_persistence = true;   // Enable .sno file persistence (CRYOWRF pattern)
+// State persistence is always enabled for WRF-SNOWPACK integration
 
 // Persistent SnowStation storage per grid point (CRYOWRF pattern)
 // Key format: "i_j" (e.g., "125_67" for grid point i=125, j=67)
@@ -266,7 +266,7 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 
     
     // Try to load existing .sno file state (CRYOWRF pattern)
     bool loaded_from_file = false;
-    if (use_state_persistence && global_snowpack_io) {
+    if (global_snowpack_io) {
         std::string sno_filename = "snowpack_states/" + stationID + ".sno";
         try {
             // Attempt to read existing snowpack state
@@ -326,7 +326,7 @@ Snowpack* get_or_create_snowpack_instance(int i_grid, int j_grid, double wrf_lat
 }
 
 void save_snowstation_state(int i_grid, int j_grid) {
-    if (!use_state_persistence || !global_snowpack_io || !time_initialized) return;
+    if (!global_snowpack_io || !time_initialized) return;
     
     std::string grid_key = generate_grid_key(i_grid, j_grid);
     auto station_it = grid_snowstations.find(grid_key);
@@ -339,30 +339,12 @@ void save_snowstation_state(int i_grid, int j_grid) {
             // Save snowpack state to .sno file (CRYOWRF pattern)
             ZwischenData zdata;  // Empty for basic usage
             
-            // Create SnowStation data for output
-            SN_SNOWSOIL_DATA output_data;
-            station_it->second->getSnowpackData(output_data);
+            // Use SNOWPACK's official writeSnowCover method (CRYOWRF pattern)
             
-            // Write to file using the station's internal data
-            std::ofstream sno_file(sno_filename);
-            if (sno_file.is_open()) {
-                // Write basic .sno format header
-                sno_file << "[STATION_PARAMETERS]" << std::endl;
-                sno_file << "station_id = " << stationID << std::endl;
-                sno_file << "station_name = " << station_it->second->meta.getStationName() << std::endl;
-                sno_file << "latitude = " << station_it->second->meta.position.getLat() << std::endl;
-                sno_file << "longitude = " << station_it->second->meta.position.getLon() << std::endl;
-                sno_file << "altitude = " << station_it->second->meta.position.getAltitude() << std::endl;
-                sno_file << "date = " << current_simulation_date.toString() << std::endl;
-                sno_file.close();
-                
-                printf("SNOWPACK-INFO: Saved state for grid (%d,%d) to %s\n", 
-                       i_grid, j_grid, sno_filename.c_str());
-            } else {
-                printf("SNOWPACK-WARNING: Could not open file for writing: %s\n", sno_filename.c_str());
-            }
+            global_snowpack_io->writeSnowCover(current_simulation_date, *(station_it->second), zdata, true);
+            printf("SNOWPACK-INFO: Saved .sno state for grid (%d,%d) using SnowpackIO\n", i_grid, j_grid);
         } catch (const std::exception& e) {
-            printf("SNOWPACK-WARNING: Failed to save state for grid (%d,%d): %s\n", 
+            printf("SNOWPACK-WARNING: Failed to save .sno state for grid (%d,%d): %s\n", 
                    i_grid, j_grid, e.what());
         }
     }
@@ -370,8 +352,6 @@ void save_snowstation_state(int i_grid, int j_grid) {
 
 // Save all active snowpack states (called periodically)
 void save_all_snowpack_states() {
-    if (!use_state_persistence) return;
-    
     printf("SNOWPACK-INFO: Saving all %d active snowpack states\n", (int)grid_snowstations.size());
     
     for (const auto& station_pair : grid_snowstations) {
