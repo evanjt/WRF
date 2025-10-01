@@ -226,7 +226,8 @@ std::string generate_grid_key(int i_grid, int j_grid) {
     return std::to_string(i_grid) + "_" + std::to_string(j_grid);
 }
 
-SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 0.0, double wrf_lon = 0.0, double wrf_alt = 1000.0) {
+SnowStation* get_or_create_snowstation(int i_grid, int j_grid, int wrf_domain_id = 1, double wrf_lat = 0.0, double wrf_lon = 0.0, double wrf_alt = 1000.0) {
+    // wrf_domain_id: 1=first domain (most common), 2=nested domain #2, etc.
     initialize_snowpack_config(); // Ensure config is loaded
     
     std::string grid_key = generate_grid_key(i_grid, j_grid);
@@ -268,8 +269,8 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, double wrf_lat = 
     bool loaded_from_file = false;
     if (global_snowpack_io) {
         // CRYOWRF C++ naming pattern: snpack_{grid_id}_{I}_{J}.sno (from Coupler.cpp line 613)
-        // grid_id=1 (domain), I,J are WRF grid indices (no +1 needed)
-        std::string sno_filename = "./input/snpack_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
+        // Let SNOWPACK handle the path through SNOWPATH configuration  
+        std::string sno_filename = "snpack_" + std::to_string(wrf_domain_id) + "_" + std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
         try {
             // Attempt to read existing snowpack state
             SN_SNOWSOIL_DATA ssdata;
