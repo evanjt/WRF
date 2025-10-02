@@ -195,8 +195,23 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     INTEGER, INTENT(IN) :: i, j, k
     
     ! Pack atmospheric forcing
+    ! CRITICAL: Convert QV (mixing ratio) to RH (relative humidity) following CRYOWRF approach
+    ! CRYOWRF: module_sf_snowpacklsm.F lines 529, 575-578
+    REAL :: q_ml, es_sat, qs_sat, rh_calc
+
+    ! Convert mixing ratio to specific humidity: Q = QV/(1+QV)
+    q_ml = qv_curr / (1.0 + qv_curr)
+
+    ! Calculate saturation vapor pressure and specific humidity (simplified Magnus formula)
+    ! CRYOWRF uses Qsat_noah function - this is equivalent for typical atmospheric conditions
+    es_sat = 611.2 * EXP(17.67 * (t_phy - 273.15) / (t_phy - 29.65))  ! Saturation vapor pressure [Pa]
+    qs_sat = 0.622 * es_sat / (p8w - 0.378 * es_sat)  ! Saturation specific humidity [kg/kg]
+
+    ! Calculate relative humidity: RH = Q / Q_sat, clamped to [0,1]
+    rh_calc = MIN(1.0, MAX(q_ml / qs_sat, 0.0))
+
     interface_data%atmos%temperature = t_phy
-    interface_data%atmos%humidity = qv_curr  
+    interface_data%atmos%humidity = rh_calc  ! Properly calculated RH, not raw QV!
     interface_data%atmos%wind_u = u_phy
     interface_data%atmos%wind_v = v_phy
     interface_data%atmos%pressure = p8w
