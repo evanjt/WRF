@@ -279,31 +279,112 @@ SnowStation* get_or_create_snowstation(int i_grid, int j_grid, int wrf_domain_id
     bool loaded_from_file = false;
     if (global_snowpack_io) {
         // CRYOWRF C++ naming pattern: snpack_{grid_id}_{I}_{J}.sno (from Coupler.cpp line 613)
-        // Let SNOWPACK handle the path through SNOWPATH configuration  
+        // Let SNOWPACK handle the path through SNOWPATH configuration
         std::string sno_filename = "snpack_" + std::to_string(wrf_domain_id) + "_" + std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
+
+        printf("SNOWPACK-INIT [%d,%d]: Attempting to load .sno file: %s\n", i_grid, j_grid, sno_filename.c_str());
+
         try {
             // Attempt to read existing snowpack state
             SN_SNOWSOIL_DATA ssdata;
             ZwischenData zdata;
             mio::Date profile_date;
-            
+
+            printf("SNOWPACK-INIT [%d,%d]: Calling readSnowCover()...\n", i_grid, j_grid);
             global_snowpack_io->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
-            
+            printf("SNOWPACK-INIT [%d,%d]: readSnowCover() returned %zu layers\n", i_grid, j_grid, ssdata.nLayers);
+
             // Initialize SnowStation with loaded data (CRYOWRF pattern)
             ssdata.meta.position = position;  // Update with current WRF coordinates
             ssdata.meta.stationID = stationID;
             ssdata.meta.stationName = stationName;
-            
+
+            printf("SNOWPACK-INIT [%d,%d]: Calling SnowStation::initialize()...\n", i_grid, j_grid);
             new_station->initialize(ssdata, 0);  // Initialize with loaded data
+            printf("SNOWPACK-INIT [%d,%d]: SnowStation::initialize() completed - %zu elements created\n",
+                   i_grid, j_grid, new_station->getNumberOfElements());
+
+            // CRITICAL FIX: ASCII SMET .sno files don't contain k/c thermal property vectors
+            // initialize() should set them to 0, but explicitly verify and fix if needed
+            printf("SNOWPACK-INIT [%d,%d]: Verifying k/c thermal property vectors...\n", i_grid, j_grid);
+
+            size_t nan_k_count = 0, nan_c_count = 0, resize_k_count = 0, resize_c_count = 0;
+
+            for (size_t e = 0; e < new_station->getNumberOfElements(); e++) {
+                // Check initial state before fixes
+                bool had_k_issue = (new_station->Edata[e].k.size() < 3);
+                bool had_c_issue = (new_station->Edata[e].c.size() < 3);
+
+                if (had_k_issue) {
+                    printf("SNOWPACK-INIT [%d,%d] Layer %zu: k vector size=%zu (WRONG, should be 3) - RESIZING\n",
+                           i_grid, j_grid, e, new_station->Edata[e].k.size());
+                    resize_k_count++;
+                }
+                if (had_c_issue) {
+                    printf("SNOWPACK-INIT [%d,%d] Layer %zu: c vector size=%zu (WRONG, should be 3) - RESIZING\n",
+                           i_grid, j_grid, e, new_station->Edata[e].c.size());
+                    resize_c_count++;
+                }
+
+                // Ensure k and c vectors have proper size (3 elements: TEMPERATURE, SEEPAGE, SETTLEMENT)
+                if (new_station->Edata[e].k.size() < 3) {
+                    new_station->Edata[e].k.resize(3, 0.0);  // Resize and initialize to 0
+                }
+                if (new_station->Edata[e].c.size() < 3) {
+                    new_station->Edata[e].c.resize(3, 0.0);  // Resize and initialize to 0
+                }
+
+                // Force initialize to 0.0 if NaN or uninitialized
+                for (size_t i = 0; i < 3; i++) {
+                    if (std::isnan(new_station->Edata[e].k[i]) || new_station->Edata[e].k[i] != new_station->Edata[e].k[i]) {
+                        printf("SNOWPACK-INIT [%d,%d] Layer %zu: k[%zu]=NaN detected - setting to 0.0\n",
+                               i_grid, j_grid, e, i);
+                        new_station->Edata[e].k[i] = 0.0;
+                        nan_k_count++;
+                    }
+                    if (std::isnan(new_station->Edata[e].c[i]) || new_station->Edata[e].c[i] != new_station->Edata[e].c[i]) {
+                        printf("SNOWPACK-INIT [%d,%d] Layer %zu: c[%zu]=NaN detected - setting to 0.0\n",
+                               i_grid, j_grid, e, i);
+                        new_station->Edata[e].c[i] = 0.0;
+                        nan_c_count++;
+                    }
+                }
+
+                // Recompute heat capacity (c[TEMPERATURE]) from layer properties
+                new_station->Edata[e].heatCapacity();
+
+                // Verify after fixes (only print first 3 layers to avoid spam)
+                if (e < 3) {
+                    printf("SNOWPACK-INIT [%d,%d] Layer %zu after fixes: k=[%.6f,%.6f,%.6f], c=[%.3f,%.3f,%.3f]\n",
+                           i_grid, j_grid, e,
+                           new_station->Edata[e].k[0], new_station->Edata[e].k[1], new_station->Edata[e].k[2],
+                           new_station->Edata[e].c[0], new_station->Edata[e].c[1], new_station->Edata[e].c[2]);
+                }
+            }
+
+            if (resize_k_count > 0 || resize_c_count > 0 || nan_k_count > 0 || nan_c_count > 0) {
+                printf("SNOWPACK-INIT [%d,%d]: ISSUES FIXED - k_resize=%zu, c_resize=%zu, k_nan=%zu, c_nan=%zu\n",
+                       i_grid, j_grid, resize_k_count, resize_c_count, nan_k_count, nan_c_count);
+            } else {
+                printf("SNOWPACK-INIT [%d,%d]: All k/c vectors verified OK (no fixes needed)\n", i_grid, j_grid);
+            }
+
             loaded_from_file = true;
-            
-            printf("SNOWPACK-INFO: Loaded existing state for grid (%d,%d) from %s - %d layers\n", 
-                   i_grid, j_grid, sno_filename.c_str(), (int)ssdata.Ldata.size());
+            printf("SNOWPACK-INFO: Loaded existing state for grid (%d,%d) from %s - %zu layers\n",
+                   i_grid, j_grid, sno_filename.c_str(), new_station->getNumberOfElements());
+            if (new_station->getNumberOfElements() > 0) {
+                printf("SNOWPACK-DEBUG: First layer after load - T=%.2fK, L=%.3fm, theta_i=%.3f, k[0]=%.6f, c[0]=%.3f\n",
+                       new_station->Edata[0].Te, new_station->Edata[0].L,
+                       new_station->Edata[0].theta[ICE],
+                       new_station->Edata[0].k[0], new_station->Edata[0].c[0]);
+            }
         } catch (const std::exception& e) {
             // No existing state file - start with fresh snowpack
-            printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh: %s\n", 
-                   i_grid, j_grid, e.what());
+            printf("SNOWPACK-INIT [%d,%d]: Failed to load .sno file - %s\n", i_grid, j_grid, e.what());
+            printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh\n", i_grid, j_grid);
         }
+    } else {
+        printf("SNOWPACK-INIT [%d,%d]: global_snowpack_io is NULL - cannot load .sno files\n", i_grid, j_grid);
     }
     
     if (!loaded_from_file) {
@@ -529,32 +610,94 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     Mdata.date = current_time;
     Mdata.ta = safe_temp;                                       // Air temperature [K]
     Mdata.rh = std::max(0.01, std::min(1.0, humidity));       // Relative humidity [0-1]
-    Mdata.vw = std::max(0.1, wind_speed);                     // Wind speed [m/s] 
+    Mdata.vw = std::max(0.1, wind_speed);                     // Wind speed [m/s]
     Mdata.dw = wind_dir;                                       // Wind direction [degrees]
     Mdata.iswr = std::max(0.0, shortwave_in);                 // Incoming shortwave [W/m²]
-    Mdata.lw_net = std::max(0.0, longwave_in);               // Net longwave radiation [W/m²] 
+    Mdata.lw_net = std::max(0.0, longwave_in);               // Net longwave radiation [W/m²]
     Mdata.psum = std::max(0.0, precipitation);                // Precipitation [mm]
     // Note: CurrentMeteo has no pressure field - pressure used internally by SNOWPACK
-    
+
     // Additional required meteorological parameters
     Mdata.psum_ph = (safe_temp < 273.65) ? 0.0 : 1.0;        // Precipitation phase (0=snow, 1=rain)
     Mdata.tss = mio::IOUtils::nodata;                         // Surface temperature (let SNOWPACK compute)
     Mdata.ts0 = safe_temp - 5.0;                              // Bottom temperature estimate
     Mdata.hs = *snow_depth;                                   // Current snow height [m]
+
+    // CRITICAL: Set roughness length and friction velocity for wind pumping calculations
+    // Without these, wind pumping produces NaN thermal conductivity
+    // Read ROUGHNESS_LENGTH from config (SNOWPACK's Meteo class also does this)
+    static double roughness_length = -1.0;  // Cache the value
+    if (roughness_length < 0.0) {
+        if (global_config) {
+            global_config->getValue("ROUGHNESS_LENGTH", "Snowpack", roughness_length, mio::IOUtils::nothrow);
+            if (roughness_length < 0.0) {
+                roughness_length = 0.002;  // Default if not in config
+                printf("SNOWPACK-INFO: ROUGHNESS_LENGTH not found in config, using default %.4f m\n", roughness_length);
+            } else {
+                printf("SNOWPACK-INFO: Read ROUGHNESS_LENGTH=%.4f m from config\n", roughness_length);
+            }
+        } else {
+            roughness_length = 0.002;  // Fallback default
+        }
+    }
+
+    // Adapt roughness based on snow presence (same logic as Meteo::MicroMet line 267)
+    const double rough_len = (*snow_depth > 0.03) ? roughness_length : 0.01;  // BareSoil_z0 typically ~0.01
+    Mdata.z0 = rough_len;
+
+    // Compute friction velocity from wind speed using log profile (same as Meteo::MicroMet line 316)
+    // u* = k * u / ln(z/z0), where k=0.4 (von Karman constant)
+    const double von_karman = 0.4;
+    const double z_wind = height;  // Measurement height [m]
+    Mdata.ustar = (z_wind > Mdata.z0) ?
+                  (von_karman * Mdata.vw / std::log(z_wind / Mdata.z0)) :
+                  (0.1 * Mdata.vw);  // Fallback if z <= z0
+    
+    // DEBUG: Print z0 and ustar values
+    if (call_count <= 5) {
+        printf("SNOWPACK-DEBUG [%d,%d]: z0=%.6f m, ustar=%.6f m/s, VW=%.2f m/s, height=%.2f m\n",
+               i_grid, j_grid, Mdata.z0, Mdata.ustar, Mdata.vw, height);
+    }
     
     // Run SNOWPACK model (temporary objects will auto-destruct)
     if (call_count <= 3) {
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling SNOWPACK model for grid (%d,%d), precip=%.3f\n", 
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: Calling SNOWPACK model for grid (%d,%d), precip=%.3f\n",
              i_grid, j_grid, precipitation);
     }
-    
+
+    // Debug: Print Mdata values before SNOWPACK call
+    printf("SNOWPACK-PHYSICS [%d,%d]: BEFORE runSnowpackModel - Ta=%.2fK, RH=%.4f, VW=%.2fm/s, ISWR=%.1fW/m2, psum=%.3fmm\n",
+           i_grid, j_grid, Mdata.ta, Mdata.rh, Mdata.vw, Mdata.iswr, Mdata.psum);
+
+    // Debug: Check snow station state before calling SNOWPACK
+    printf("SNOWPACK-PHYSICS [%d,%d]: SnowStation state - nElements=%zu, nNodes=%zu, cH=%.3fm, swe=%.2fmm\n",
+           i_grid, j_grid, snow_station->getNumberOfElements(), snow_station->getNumberOfNodes(),
+           snow_station->cH, snow_station->swe);
+
+    if (snow_station->getNumberOfElements() > 0) {
+        printf("SNOWPACK-PHYSICS [%d,%d]: First element BEFORE runSnowpackModel - Te=%.2fK, L=%.3fm, k=[%.6f,%.6f,%.6f], c=[%.3f,%.3f,%.3f]\n",
+               i_grid, j_grid, snow_station->Edata[0].Te, snow_station->Edata[0].L,
+               snow_station->Edata[0].k[0], snow_station->Edata[0].k[1], snow_station->Edata[0].k[2],
+               snow_station->Edata[0].c[0], snow_station->Edata[0].c[1], snow_station->Edata[0].c[2]);
+    }
+
     // Execute SNOWPACK physics (correct API with cumulative precipitation parameter)
-    double cumu_precip = 0.0;  // Cumulative precipitation parameter  
+    double cumu_precip = 0.0;  // Cumulative precipitation parameter
+    printf("SNOWPACK-PHYSICS [%d,%d]: >>> Calling snowpack_instance->runSnowpackModel() <<<\n", i_grid, j_grid);
     snowpack_instance->runSnowpackModel(Mdata, *snow_station, cumu_precip, sn_Bdata, surfFluxes);
-    
+    printf("SNOWPACK-PHYSICS [%d,%d]: >>> runSnowpackModel() returned successfully <<<\n", i_grid, j_grid);
+
     if (call_count <= 3) {
-      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SNOWPACK model completed successfully for grid (%d,%d)\n", 
+      printf("SNOWPACK-DEBUG [C++/snowpack_wrf_bridge.cpp]: SNOWPACK model completed successfully for grid (%d,%d)\n",
              i_grid, j_grid);
+    }
+
+    // Debug: Check what changed after SNOWPACK ran
+    if (snow_station->getNumberOfElements() > 0) {
+        printf("SNOWPACK-PHYSICS [%d,%d]: First element AFTER runSnowpackModel - Te=%.2fK, L=%.3fm, k=[%.6f,%.6f,%.6f], c=[%.3f,%.3f,%.3f]\n",
+               i_grid, j_grid, snow_station->Edata[0].Te, snow_station->Edata[0].L,
+               snow_station->Edata[0].k[0], snow_station->Edata[0].k[1], snow_station->Edata[0].k[2],
+               snow_station->Edata[0].c[0], snow_station->Edata[0].c[1], snow_station->Edata[0].c[2]);
     }
     
     // Extract results from SNOWPACK (using correct member names)
@@ -705,6 +848,39 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     Mdata.psum_ph = (safe_temp < 273.65) ? 0.0 : 1.0;
     Mdata.tss = mio::IOUtils::nodata;
     Mdata.ts0 = safe_temp - 5.0;
+
+    // Initialize z0 and ustar (required for wind pumping in thermal conductivity)
+    // Read ROUGHNESS_LENGTH from config (same as SNOWPACK's Meteo::MicroMet)
+    static double roughness_length = -1.0;
+    if (roughness_length < 0.0) {
+        if (global_config) {
+            global_config->getValue("ROUGHNESS_LENGTH", "Snowpack", roughness_length, mio::IOUtils::nothrow);
+            if (roughness_length < 0.0) {
+                roughness_length = 0.002;  // Default if not in config
+                printf("SNOWPACK-INFO: ROUGHNESS_LENGTH not found in config, using default %.4f m\n", roughness_length);
+            } else {
+                printf("SNOWPACK-INFO: Read ROUGHNESS_LENGTH=%.4f m from config\n", roughness_length);
+            }
+        }
+    }
+    
+    // Adapt roughness based on snow presence (same logic as Meteo::MicroMet line 267)
+    const double rough_len = (*snow_depth > 0.03) ? roughness_length : 0.01;  // BareSoil_z0 typically ~0.01
+    Mdata.z0 = rough_len;
+    
+    // Compute friction velocity from wind speed using log profile (same as Meteo::MicroMet line 316)
+    // u* = k * u / ln(z/z0), where k=0.4 (von Karman constant)
+    const double von_karman = 0.4;
+    const double z_wind = height;  // Measurement height [m]
+    Mdata.ustar = (z_wind > Mdata.z0) ?
+                  (von_karman * Mdata.vw / std::log(z_wind / Mdata.z0)) :
+                  (0.1 * Mdata.vw);  // Fallback if z <= z0
+    
+    // DEBUG: Print z0 and ustar values for first few calls
+    if (call_count <= 5) {
+        printf("SNOWPACK-DEBUG [%d,%d]: z0=%.6f m, ustar=%.6f m/s, VW=%.2f m/s, height=%.2f m, snow_depth=%.3f m\n",
+               i_grid, j_grid, Mdata.z0, Mdata.ustar, Mdata.vw, height, *snow_depth);
+    }
     Mdata.hs = *snow_depth;
     
     // Execute SNOWPACK physics
