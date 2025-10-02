@@ -287,20 +287,17 @@ submodules :
 	else \
 		echo No action required for MYNN-EDMF submodule ; \
 	fi
-	@if [ ! -d snowpack/meteoio/build ] ; then \
-		echo Initializing SNOWPACK submodules ; \
-		( cd .. ; git submodule update --init --recursive ) ; \
-		echo Building MeteoIO library ; \
-		( cd snowpack/meteoio && mkdir -p build lib && cd build && \
-		  cmake .. -DCMAKE_BUILD_TYPE=Release && make -j 4 && \
-		  cp meteoio/libmeteoio.so ../lib/ ) ; \
-		echo Building SNOWPACK library ; \
-		( cd snowpack/snowpack && mkdir -p build lib && cd build && \
-		  cmake .. -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/build && \
-		  make -j 4 && cp snowpack/libsnowpack.so ../lib/ ) ; \
-	else \
-		echo SNOWPACK libraries already built ; \
-	fi
+	@echo Initializing SNOWPACK submodules
+	@( cd .. ; git submodule update --init --recursive )
+	@echo Cleaning previous SNOWPACK builds
+	@rm -rf snowpack/meteoio/build snowpack/snowpack/build
+	@echo Building MeteoIO library
+	@( cd snowpack/meteoio && mkdir -p build lib && cd build && \
+	  cmake .. -DCMAKE_BUILD_TYPE=Release && make -j 32 )
+	@echo Building SNOWPACK library
+	@( cd snowpack/snowpack && mkdir -p build lib && cd build && \
+	  cmake .. -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/build && \
+	  make -j 32 )
 
 # C++ object compilation for SNOWPACK interface
 snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp submodules
