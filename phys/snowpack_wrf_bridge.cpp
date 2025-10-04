@@ -731,21 +731,23 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
   }
 }
 
-// Enhanced interface with detailed layer extraction
-void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
+// Enhanced interface with detailed layer extraction (internal C++ function)
+void snowpack_physics_layers_internal(double temp_air, double humidity, double wind_speed, double wind_dir,
                              double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
                              int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
                              double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
                              // Layer arrays (max 50 layers)
                              int* n_layers,
-                             double* layer_temp, double* layer_thick, 
+                             double* layer_temp, double* layer_thick,
                              double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
                              double* layer_grain_radius, double* layer_bond_radius,
                              double* layer_dendricity, double* layer_sphericity,
-                             // Budget tracking
-                             double* mass_precip, double* mass_sublim, double* mass_melt,
-                             double* energy_lw_in, double* energy_sensible, double* energy_latent) {
+                             // Budget tracking - mass budgets
+                             double* mass_precip, double* mass_sublim, double* mass_melt, double* mass_swe, double* mass_refreeze,
+                             // Budget tracking - energy budgets
+                             double* energy_lw_in, double* energy_lw_out, double* energy_sw_in, double* energy_sw_out,
+                             double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain, double* energy_total) {
   
   // Track physics calls for debugging
   static int call_count = 0;
@@ -934,15 +936,51 @@ void snowpack_physics_layers(double temp_air, double humidity, double wind_speed
     }
     
     // Extract mass budget information from SurfaceFluxes
-    *mass_precip = surfFluxes.mass[SurfaceFluxes::MS_RAIN] + 
+    *mass_precip = surfFluxes.mass[SurfaceFluxes::MS_RAIN] +
                    surfFluxes.mass[SurfaceFluxes::MS_HNW];      // Total precipitation [kg/m²] (rain + solid)
     *mass_sublim = surfFluxes.mass[SurfaceFluxes::MS_SUBLIMATION]; // Sublimation [kg/m²]
     *mass_melt = surfFluxes.mass[SurfaceFluxes::MS_SNOWPACK_RUNOFF]; // Melt runoff [kg/m²]
-    
+    *mass_swe = *snow_swe;                                  // Current SWE [mm] = [kg/m²]
+
+    // Extract refreeze from snowpack elements
+    double refreeze_mass = 0.0;
+    for (size_t e = 0; e < snow_station->Edata.size(); e++) {
+      if (snow_station->Edata[e].theta[WATER_PREF] > 0.0) {
+        refreeze_mass += snow_station->Edata[e].M * snow_station->Edata[e].theta[WATER_PREF];
+      }
+    }
+    *mass_refreeze = refreeze_mass;                         // Refrozen water [kg/m²]
+
     // Extract energy budget information
     *energy_lw_in = Mdata.lw_net;                           // Net LW radiation [W/m²]
+
+    // Outgoing longwave from Stefan-Boltzmann
+    const double SIGMA = 5.67e-8;                           // Stefan-Boltzmann constant [W/m²/K⁴]
+    const double EMISSIVITY = 0.98;                         // Snow emissivity
+    *energy_lw_out = EMISSIVITY * SIGMA * pow(*surface_temp, 4.0); // Outgoing LW [W/m²]
+
+    // Shortwave budget
+    *energy_sw_in = shortwave_in;                           // Incoming shortwave [W/m²]
+    *energy_sw_out = shortwave_in * (1.0 - *albedo);        // Reflected shortwave [W/m²]
+
+    // Turbulent fluxes
     *energy_sensible = surfFluxes.qs;                       // Sensible heat flux [W/m²]
     *energy_latent = surfFluxes.ql;                         // Latent heat flux [W/m²]
+
+    // Ground heat flux from boundary condition
+    *energy_ground_flux = (snow_station->Ndata.size() > 0) ? sn_Bdata.qs : 0.0; // Ground flux [W/m²]
+
+    // Rain energy
+    const double CP_WATER = 4218.0;                         // Specific heat of water [J/kg/K]
+    const double T_REF = 273.15;                            // Reference temperature [K]
+    double rain_mass_rate = surfFluxes.mass[SurfaceFluxes::MS_RAIN]; // Rain rate [kg/m²/s]
+    *energy_rain = rain_mass_rate * CP_WATER * (temp_air - T_REF); // Rain energy [W/m²]
+
+    // Total energy balance (conservation check)
+    *energy_total = *energy_sw_in - *energy_sw_out +
+                    *energy_lw_in - *energy_lw_out +
+                    *energy_sensible + *energy_latent +
+                    *energy_ground_flux + *energy_rain;         // Total energy change [W/m²]
     
     if (call_count <= 5) {
       printf("SNOWPACK-LAYERS [C++]: Grid (%d,%d) - %d layers, T_sfc=%.1fK, SWE=%.2fmm, depth=%.2fm\n",
@@ -1037,3 +1075,48 @@ void save_all_snowpack_states_c() {
 }
 
 } // extern "C"
+
+// Forward declaration of internal C++ function
+void snowpack_physics_layers_internal(double temp_air, double humidity, double wind_speed, double wind_dir,
+                             double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
+                             int i_grid, int j_grid, double wrf_lat, double wrf_lon,
+                             double* snow_swe, double* snow_depth, double* surface_temp,
+                             double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                             int* n_layers,
+                             double* layer_temp, double* layer_thick,
+                             double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
+                             double* layer_grain_radius, double* layer_bond_radius,
+                             double* layer_dendricity, double* layer_sphericity,
+                             double* mass_precip, double* mass_sublim, double* mass_melt, double* mass_swe, double* mass_refreeze,
+                             double* energy_lw_in, double* energy_lw_out, double* energy_sw_in, double* energy_sw_out,
+                             double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain, double* energy_total);
+
+// Extern C wrapper for Fortran BIND(C) interface
+extern "C" void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
+                             double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
+                             int i_grid, int j_grid,
+                             double* snow_swe, double* snow_depth, double* surface_temp,
+                             double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                             int* n_layers,
+                             double* layer_temp, double* layer_thick,
+                             double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
+                             double* layer_grain_radius, double* layer_bond_radius,
+                             double* layer_dendricity, double* layer_sphericity,
+                             double* mass_precip, double* mass_sublim, double* mass_melt, double* mass_swe, double* mass_refreeze,
+                             double* energy_lw_in, double* energy_lw_out, double* energy_sw_in, double* energy_sw_out,
+                             double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain, double* energy_total) {
+    // Call internal C++ function with default lat/lon (will be derived from grid indices if needed)
+    snowpack_physics_layers_internal(temp_air, humidity, wind_speed, wind_dir,
+                            shortwave_in, longwave_in, precipitation, pressure, height, dt,
+                            i_grid, j_grid, 0.0, 0.0,  // wrf_lat=0.0, wrf_lon=0.0 as defaults
+                            snow_swe, snow_depth, surface_temp,
+                            heat_flux_sensible, heat_flux_latent, albedo, snow_coverage,
+                            n_layers,
+                            layer_temp, layer_thick,
+                            layer_vol_ice, layer_vol_water, layer_vol_air,
+                            layer_grain_radius, layer_bond_radius,
+                            layer_dendricity, layer_sphericity,
+                            mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze,
+                            energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out,
+                            energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total);
+}
