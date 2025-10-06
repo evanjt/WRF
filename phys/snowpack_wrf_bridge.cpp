@@ -866,7 +866,7 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
                              int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
                              double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
-                             // Layer arrays (max 50 layers)
+                             // Layer arrays (max 100 layers)
                              int* n_layers,
                              double* layer_temp, double* layer_thick,
                              double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
@@ -1153,9 +1153,9 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
         *n_layers = static_cast<int>(num_elements);
         printf("SNOWPACK-DEBUG [%d,%d]:   n_layers set to: %d\n", i_grid, j_grid, *n_layers);
 
-        // Limit to max 50 layers for WRF arrays
-        printf("SNOWPACK-DEBUG [%d,%d]:   Calculating layers to extract (max 50)...\n", i_grid, j_grid);
-        size_t layers_to_extract = std::min(num_elements, size_t(50));
+        // Limit to max 100 layers for WRF arrays
+        printf("SNOWPACK-DEBUG [%d,%d]:   Calculating layers to extract (max 100)...\n", i_grid, j_grid);
+        size_t layers_to_extract = std::min(num_elements, size_t(100));
         printf("SNOWPACK-DEBUG [%d,%d]:   Will extract %zu layers\n", i_grid, j_grid, layers_to_extract);
 
         printf("SNOWPACK-DEBUG [%d,%d]:   Starting layer extraction loop...\n", i_grid, j_grid);
@@ -1392,7 +1392,7 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
 
     // Clear unused layers (initialize remaining array elements)
     printf("SNOWPACK-DEBUG [%d,%d]: Clearing unused layer array elements...\n", i_grid, j_grid);
-    for (size_t i = static_cast<size_t>(*n_layers); i < 50; i++) {
+    for (size_t i = static_cast<size_t>(*n_layers); i < 100; i++) {
       layer_temp[i] = 0.0;
       layer_thick[i] = 0.0;
       layer_vol_ice[i] = 0.0;
@@ -1429,7 +1429,7 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
         printf("SNOWPACK-FATAL [%d,%d]: snow_swe is NaN/Inf (%.6f)!\n", i_grid, j_grid, *snow_swe);
         std::abort();
     }
-    if (*n_layers < 0 || *n_layers > 50) {
+    if (*n_layers < 0 || *n_layers > 100) {
         printf("SNOWPACK-FATAL [%d,%d]: n_layers is invalid (%d)!\n", i_grid, j_grid, *n_layers);
         std::abort();
     }
@@ -1491,14 +1491,14 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
 
 // Extract detailed layer data from SNOWPACK for CRYOWRF compatibility
 void extract_snowpack_layers_c(int i_grid, int j_grid,
-                               float layer_temps[50], float layer_thick[50],
-                               float layer_voli[50], float layer_volw[50], float layer_volv[50],
-                               float layer_rg[50], float layer_rb[50], 
-                               float layer_dd[50], float layer_sp[50],
+                               float layer_temps[100], float layer_thick[100],
+                               float layer_voli[100], float layer_volw[100], float layer_volv[100],
+                               float layer_rg[100], float layer_rb[100],
+                               float layer_dd[100], float layer_sp[100],
                                int* n_layers) {
   try {
     // Initialize all arrays to zero
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 100; i++) {
       layer_temps[i] = 0.0f;
       layer_thick[i] = 0.0f;
       layer_voli[i] = 0.0f;
@@ -1530,12 +1530,12 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
     
     const std::vector<ElementData>& elem_data = xdata->Edata;
     const int get_size = (int)xdata->getNumberOfElements();
-    const int loc_snpack_lay_to_sav = 50; // Maximum layers to save (CRYOWRF default)
+    const int loc_snpack_lay_to_sav = 100; // Maximum layers to save (CRYOWRF default)
     const int lim_size = std::max(0, get_size - loc_snpack_lay_to_sav);
     
     // CRYOWRF algorithm: Extract from surface down, top-down indexing
     int tmtm = 0;
-    for (int e = get_size - 1; e >= lim_size && tmtm < 50; e--, tmtm++) {
+    for (int e = get_size - 1; e >= lim_size && tmtm < 100; e++, tmtm++) {
       // Extract layer data using exact CRYOWRF algorithm
       // With persistent SnowStation objects, evolved snowpack layers are available for extraction
       if (e + 1 < (int)xdata->Ndata.size()) { // Safety check for node access
@@ -1643,7 +1643,7 @@ extern "C" void snowpack_physics_layers(double temp_air, double humidity, double
         // Initialize layer arrays to safe values (only if pointers are not NULL)
         if (layer_temp && layer_thick && layer_vol_ice && layer_vol_water && layer_vol_air &&
             layer_grain_radius && layer_bond_radius && layer_dendricity && layer_sphericity) {
-            for (int i = 0; i < 50; i++) {
+            for (int i = 0; i < 100; i++) {
                 layer_temp[i] = temp_air;
                 layer_thick[i] = 0.0;
                 layer_vol_ice[i] = 0.0;

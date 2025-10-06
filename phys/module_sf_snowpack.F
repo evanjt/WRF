@@ -52,10 +52,10 @@
           REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
 
           INTEGER(C_INT), INTENT(OUT) :: n_layers
-          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_temp, layer_thick
-          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_vol_ice, layer_vol_water, layer_vol_air
-          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_grain_radius, layer_bond_radius
-          REAL(C_DOUBLE), DIMENSION(50), INTENT(OUT) :: layer_dendricity, layer_sphericity
+          REAL(C_DOUBLE), DIMENSION(100), INTENT(OUT) :: layer_temp, layer_thick
+          REAL(C_DOUBLE), DIMENSION(100), INTENT(OUT) :: layer_vol_ice, layer_vol_water, layer_vol_air
+          REAL(C_DOUBLE), DIMENSION(100), INTENT(OUT) :: layer_grain_radius, layer_bond_radius
+          REAL(C_DOUBLE), DIMENSION(100), INTENT(OUT) :: layer_dendricity, layer_sphericity
 
           REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
           REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
@@ -111,15 +111,15 @@
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: snowh
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: qsfc
 
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_T
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_thick
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_volI
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_volW
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_volV
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_rg
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_rb
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_dd
-        REAL, DIMENSION(ims:ime, 1:50, jms:jme), INTENT(INOUT) :: sn_sp
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_T
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_thick
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_volI
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_volW
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_volV
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_rg
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_rb
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_dd
+        REAL, DIMENSION(ims:ime, 1:100, jms:jme), INTENT(INOUT) :: sn_sp
         INTEGER, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: sn_nlayers
 
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: m_budg_precip
@@ -153,9 +153,9 @@
         REAL(C_DOUBLE) :: heat_sens_c, heat_lat_c, albedo_c, snow_cov_c
 
         INTEGER(C_INT) :: n_layers_c
-        REAL(C_DOUBLE), DIMENSION(50) :: layer_temp_c, layer_thick_c
-        REAL(C_DOUBLE), DIMENSION(50) :: layer_voli_c, layer_volw_c, layer_volv_c
-        REAL(C_DOUBLE), DIMENSION(50) :: layer_rg_c, layer_rb_c, layer_dd_c, layer_sp_c
+        REAL(C_DOUBLE), DIMENSION(100) :: layer_temp_c, layer_thick_c
+        REAL(C_DOUBLE), DIMENSION(100) :: layer_voli_c, layer_volw_c, layer_volv_c
+        REAL(C_DOUBLE), DIMENSION(100) :: layer_rg_c, layer_rb_c, layer_dd_c, layer_sp_c
         REAL(C_DOUBLE) :: mass_precip_c, mass_sublim_c, mass_melt_c, mass_swe_c, mass_refreeze_c
         REAL(C_DOUBLE) :: energy_lw_in_c, energy_lw_out_c, energy_sw_in_c, energy_sw_out_c
         REAL(C_DOUBLE) :: energy_sens_c, energy_lat_c, energy_gflux_c, energy_rain_c, energy_total_c
@@ -231,7 +231,7 @@
 
       ! CRYOWRF only writes layer data at periodic intervals (snpack_write_dt)
       IF (MOD(itimestep, INT(21600.0/dt)) == 0) THEN
-          DO k = 1, MIN(INT(n_layers_c), 50)
+          DO k = 1, MIN(INT(n_layers_c), 100)
               sn_T(i,k,j)     = REAL(layer_temp_c(k))
               sn_thick(i,k,j) = REAL(layer_thick_c(k))
               sn_volI(i,k,j)  = REAL(layer_voli_c(k))
@@ -244,7 +244,7 @@
           END DO
 
           ! Initialize remaining layers to missing value
-          DO k = INT(n_layers_c) + 1, 50
+          DO k = INT(n_layers_c) + 1, 100
               sn_T(i,k,j)     = -999.0
               sn_thick(i,k,j) = -999.0
               sn_volI(i,k,j)  = -999.0

@@ -29,9 +29,9 @@ MODULE module_sf_snowpackdrv
             BIND(C, name='extract_snowpack_layers_c')
             USE ISO_C_BINDING
             INTEGER(C_INT), INTENT(IN) :: i_grid, j_grid
-            REAL(C_FLOAT), INTENT(OUT) :: layer_temps(50), layer_thick(50)
-            REAL(C_FLOAT), INTENT(OUT) :: layer_voli(50), layer_volw(50), layer_volv(50)
-            REAL(C_FLOAT), INTENT(OUT) :: layer_rg(50), layer_rb(50), layer_dd(50), layer_sp(50)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_temps(100), layer_thick(100)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_voli(100), layer_volw(100), layer_volv(100)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_rg(100), layer_rb(100), layer_dd(100), layer_sp(100)
             INTEGER(C_INT), INTENT(OUT) :: n_layers
         END SUBROUTINE extract_snowpack_layers_c
     END INTERFACE
@@ -151,15 +151,15 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     REAL,    DIMENSION( ims:ime,          jms:jme ), INTENT(INOUT) ::  ZNT       ! thermal roughness length
 
 ! CRYOWRF layer arrays (OPTIONAL - matching CRYOWRF behavior)
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_T        ! layer temperature [K]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_THICK    ! layer thickness [m]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLI     ! ice volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLW     ! water volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLV     ! air volume fraction [%]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RG       ! grain radius [mm]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RB       ! bond radius [mm]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_DD       ! dendricity [-]
-    REAL,    DIMENSION( ims:ime, 1:50, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_SP       ! sphericity [-]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_T        ! layer temperature [K]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_THICK    ! layer thickness [m]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLI     ! ice volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLW     ! water volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_VOLV     ! air volume fraction [%]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RG       ! grain radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RB       ! bond radius [mm]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_DD       ! dendricity [-]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_SP       ! sphericity [-]
     INTEGER, DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_NLAYERS  ! number of layers
 
 ! CRYOWRF mass budget arrays (OPTIONAL - matching CRYOWRF behavior)

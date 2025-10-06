@@ -7,7 +7,7 @@ MODULE module_snowpack_types
 IMPLICIT NONE
 
 ! Maximum number of snow layers for arrays
-INTEGER, PARAMETER :: MAX_SNOW_LAYERS = 50
+INTEGER, PARAMETER :: MAX_SNOW_LAYERS = 100
 
 !-------------------------------------------------------------------
 ! Atmospheric forcing data structure
@@ -309,10 +309,10 @@ SUBROUTINE snowpack_physics_structured(interface_data)
           REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
           
           INTEGER(C_INT), INTENT(OUT) :: n_layers
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_temp(50), layer_thick(50)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_vol_ice(50), layer_vol_water(50), layer_vol_air(50)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_grain_radius(50), layer_bond_radius(50)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_dendricity(50), layer_sphericity(50)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_temp(100), layer_thick(100)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_vol_ice(100), layer_vol_water(100), layer_vol_air(100)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_grain_radius(100), layer_bond_radius(100)
+          REAL(C_DOUBLE), INTENT(OUT) :: layer_dendricity(100), layer_sphericity(100)
           REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
           REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
           REAL(C_DOUBLE), INTENT(OUT) :: energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
@@ -329,10 +329,10 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     
     ! Layer arrays for detailed extraction
     INTEGER :: n_layers
-    REAL(8), DIMENSION(50) :: layer_temp, layer_thick
-    REAL(8), DIMENSION(50) :: layer_vol_ice, layer_vol_water, layer_vol_air
-    REAL(8), DIMENSION(50) :: layer_grain_radius, layer_bond_radius
-    REAL(8), DIMENSION(50) :: layer_dendricity, layer_sphericity
+    REAL(8), DIMENSION(100) :: layer_temp, layer_thick
+    REAL(8), DIMENSION(100) :: layer_vol_ice, layer_vol_water, layer_vol_air
+    REAL(8), DIMENSION(100) :: layer_grain_radius, layer_bond_radius
+    REAL(8), DIMENSION(100) :: layer_dendricity, layer_sphericity
     
     ! Budget tracking variables
     REAL(8) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
