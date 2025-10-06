@@ -32,7 +32,7 @@
         SUBROUTINE snowpack_physics_layers_c( &
             temp_air, humidity, wind_speed, wind_dir, &
             shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-            i_grid, j_grid, &
+            i_grid, j_grid, wrf_lat, wrf_lon, &
             snow_swe, snow_depth, surface_temp, &
             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
             n_layers, &
@@ -46,6 +46,7 @@
           REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
           REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
           INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid, j_grid
+          REAL(C_DOUBLE), VALUE, INTENT(IN) :: wrf_lat, wrf_lon
 
           REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
           REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
@@ -69,6 +70,7 @@
         itimestep, dt, &
         t_phy, qv_curr, u_phy, v_phy, p8w, dz8w, &
         swdown, glw, rainbl, &
+        xlat, xlong, &
         tsk, hfx, qfx, lh, albedo, snowc, &
         snow, snowh, qsfc, &
         sn_T, sn_thick, sn_volI, sn_volW, sn_volV, &
@@ -95,6 +97,8 @@
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: swdown
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: glw
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: rainbl
+        REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: xlat
+        REAL, DIMENSION(ims:ime, jms:jme), INTENT(IN) :: xlong
 
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: tsk
         REAL, DIMENSION(ims:ime, jms:jme), INTENT(INOUT) :: hfx
@@ -201,6 +205,7 @@
         REAL(swdown(i,j), C_DOUBLE), REAL(glw(i,j), C_DOUBLE), &
         REAL(precip_rate, C_DOUBLE), REAL(p_ml, C_DOUBLE), REAL(z_ml, C_DOUBLE), &
         REAL(dt, C_DOUBLE), INT(i, C_INT), INT(j, C_INT), &
+        REAL(xlat(i,j), C_DOUBLE), REAL(xlong(i,j), C_DOUBLE), &
         snow_swe_c, snow_depth_c, surface_temp_c, &
         heat_sens_c, heat_lat_c, albedo_c, snow_cov_c, &
         n_layers_c, &

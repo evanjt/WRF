@@ -1076,8 +1076,8 @@ void save_all_snowpack_states_c() {
 
 } // extern "C"
 
-// Forward declaration of internal C++ function
-void snowpack_physics_layers_internal(double temp_air, double humidity, double wind_speed, double wind_dir,
+// Extern C wrapper for Fortran BIND(C) interface
+extern "C" void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
                              double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
                              int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
@@ -1089,26 +1089,11 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
                              double* layer_dendricity, double* layer_sphericity,
                              double* mass_precip, double* mass_sublim, double* mass_melt, double* mass_swe, double* mass_refreeze,
                              double* energy_lw_in, double* energy_lw_out, double* energy_sw_in, double* energy_sw_out,
-                             double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain, double* energy_total);
-
-// Extern C wrapper for Fortran BIND(C) interface
-extern "C" void snowpack_physics_layers(double temp_air, double humidity, double wind_speed, double wind_dir,
-                             double shortwave_in, double longwave_in, double precipitation, double pressure, double height, double dt,
-                             int i_grid, int j_grid,
-                             double* snow_swe, double* snow_depth, double* surface_temp,
-                             double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
-                             int* n_layers,
-                             double* layer_temp, double* layer_thick,
-                             double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
-                             double* layer_grain_radius, double* layer_bond_radius,
-                             double* layer_dendricity, double* layer_sphericity,
-                             double* mass_precip, double* mass_sublim, double* mass_melt, double* mass_swe, double* mass_refreeze,
-                             double* energy_lw_in, double* energy_lw_out, double* energy_sw_in, double* energy_sw_out,
                              double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain, double* energy_total) {
-    // Call internal C++ function with default lat/lon (will be derived from grid indices if needed)
+    // Call internal C++ function with proper coordinates from WRF
     snowpack_physics_layers_internal(temp_air, humidity, wind_speed, wind_dir,
                             shortwave_in, longwave_in, precipitation, pressure, height, dt,
-                            i_grid, j_grid, 0.0, 0.0,  // wrf_lat=0.0, wrf_lon=0.0 as defaults
+                            i_grid, j_grid, wrf_lat, wrf_lon,  // Use actual WRF coordinates
                             snow_swe, snow_depth, surface_temp,
                             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage,
                             n_layers,
