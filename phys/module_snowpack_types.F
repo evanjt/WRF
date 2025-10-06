@@ -295,8 +295,9 @@ SUBROUTINE snowpack_physics_structured(interface_data)
             n_layers, &
             layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
             layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
-            mass_precip, mass_sublim, mass_melt, &
-            energy_lw_in, energy_sensible, energy_latent) BIND(C, name="snowpack_physics_layers")
+            mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze, &
+            energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out, &
+            energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total) BIND(C, name="snowpack_physics_layers")
           
           USE, INTRINSIC :: iso_c_binding
           REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
@@ -312,8 +313,9 @@ SUBROUTINE snowpack_physics_structured(interface_data)
           REAL(C_DOUBLE), INTENT(OUT) :: layer_vol_ice(50), layer_vol_water(50), layer_vol_air(50)
           REAL(C_DOUBLE), INTENT(OUT) :: layer_grain_radius(50), layer_bond_radius(50)
           REAL(C_DOUBLE), INTENT(OUT) :: layer_dendricity(50), layer_sphericity(50)
-          REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt
-          REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_sensible, energy_latent
+          REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
+          REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
+          REAL(C_DOUBLE), INTENT(OUT) :: energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
           
         END SUBROUTINE snowpack_physics_layers_c
     END INTERFACE
@@ -333,8 +335,9 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     REAL(8), DIMENSION(50) :: layer_dendricity, layer_sphericity
     
     ! Budget tracking variables
-    REAL(8) :: mass_precip, mass_sublim, mass_melt
-    REAL(8) :: energy_lw_in, energy_sensible, energy_latent
+    REAL(8) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
+    REAL(8) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
+    REAL(8) :: energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
     
     INTEGER :: k
     
@@ -366,8 +369,9 @@ SUBROUTINE snowpack_physics_structured(interface_data)
                                    n_layers, &
                                    layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
                                    layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
-                                   mass_precip, mass_sublim, mass_melt, &
-                                   energy_lw_in, energy_sensible, energy_latent)
+                                   mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze, &
+                                   energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out, &
+                                   energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total)
     
     ! Unpack surface results back to interface structure
     interface_data%surface%snow_swe = REAL(snow_swe)
