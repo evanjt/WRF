@@ -69,6 +69,10 @@ TYPE :: SurfaceState
     ! Roughness
     REAL    :: roughness_mom   ! Momentum roughness length [m]
     REAL    :: roughness_heat  ! Heat roughness length [m]
+
+    ! Atmospheric variables (CRYOWRF compatibility)
+    REAL    :: friction_velocity ! Friction velocity [m/s]
+    REAL    :: stability_param  ! Atmospheric stability parameter [dimensionless]
 END TYPE SurfaceState
 
 !-------------------------------------------------------------------
@@ -97,6 +101,10 @@ TYPE :: PhysicsBudgets
     REAL    :: accum_snowfall  ! Accumulated snowfall since start
     REAL    :: accum_snowmelt  ! Accumulated snow melt since start
     REAL    :: accum_sublim    ! Accumulated sublimation since start
+
+    ! Runoff components [mm] - accumulated over timestep (CRYOWRF compatibility)
+    REAL    :: runoff_surface  ! Surface runoff from snow melt
+    REAL    :: runoff_subsurface ! Subsurface runoff from soil
 END TYPE PhysicsBudgets
 
 !-------------------------------------------------------------------
@@ -159,13 +167,17 @@ SUBROUTINE initialize_snowpack_interface(interface_data, itimestep, dt, dx)
     interface_data%layers%n_layers = 0
     interface_data%layers%layer_temp = 0.0
     interface_data%layers%layer_thick = 0.0
-    
+
     ! Initialize budgets (important - don't reset accumulators!)
     interface_data%budgets%mass_precip = 0.0
     interface_data%budgets%mass_sublim = 0.0
     interface_data%budgets%energy_sw_in = 0.0
     interface_data%budgets%energy_lw_in = 0.0
     ! Note: accum_* variables should persist between calls
+
+    ! Initialize atmospheric variables (CRYOWRF compatibility)
+    interface_data%surface%friction_velocity = 0.0
+    interface_data%surface%stability_param = 0.0
     
 END SUBROUTINE initialize_snowpack_interface
 
@@ -273,6 +285,9 @@ SUBROUTINE unpack_interface_to_wrf(interface_data, &
     qsfc = interface_data%surface%moisture_flux
     z0 = interface_data%surface%roughness_mom
     znt = interface_data%surface%roughness_heat
+
+    ! Note: CRYOWRF atmospheric variables (friction_velocity, stability_param)
+    ! are available in interface_data%surface% but not used in standard WRF LSM interface
     
 END SUBROUTINE unpack_interface_to_wrf
 
@@ -292,6 +307,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
             i_grid, j_grid, wrf_lat, wrf_lon, &
             snow_swe, snow_depth, surface_temp, &
             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
+            friction_velocity, stability_param, &
             n_layers, &
             layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
             layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
@@ -307,6 +323,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
           
           REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
           REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
+          REAL(C_DOUBLE), INTENT(OUT) :: friction_velocity, stability_param
           
           INTEGER(C_INT), INTENT(OUT) :: n_layers
           REAL(C_DOUBLE), INTENT(OUT) :: layer_temp(100), layer_thick(100)
@@ -326,6 +343,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     INTEGER :: i_grid, j_grid
     REAL(8) :: snow_swe, snow_depth, surface_temp
     REAL(8) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
+    REAL(8) :: friction_velocity, stability_param
     
     ! Layer arrays for detailed extraction
     INTEGER :: n_layers
@@ -366,6 +384,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
                                    i_grid, j_grid, DBLE(interface_data%atmos%latitude), DBLE(interface_data%atmos%longitude), &
                                    snow_swe, snow_depth, surface_temp, &
                                    heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
+                                   friction_velocity, stability_param, &
                                    n_layers, &
                                    layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
                                    layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
@@ -381,6 +400,8 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     interface_data%surface%heat_latent = REAL(heat_flux_latent)
     interface_data%surface%albedo = REAL(albedo)
     interface_data%surface%snow_coverage = REAL(snow_coverage)
+    interface_data%surface%friction_velocity = REAL(friction_velocity)
+    interface_data%surface%stability_param = REAL(stability_param)
     
     ! Store extracted layer data
     interface_data%layers%n_layers = n_layers

@@ -304,16 +304,22 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         
         ! Extract CRYOWRF budget arrays if present (matching CRYOWRF behavior)
         IF (PRESENT(M_BUDG_PRECIP)) THEN
-            M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip
-            M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim
-            M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt
+            M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip     ! Precipitation mass [kg/m²]
+            M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim    ! Sublimation mass [kg/m²]
+            M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt        ! Melt mass [kg/m²]
         END IF
-        
+
         IF (PRESENT(E_BUDG_LW_IN)) THEN
-            E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in
-            E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible
-            E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent
+            E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in     ! Longwave radiation in [J/m²]
+            E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible ! Sensible heat [J/m²]
+            E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent    ! Latent heat [J/m²]
         END IF
+
+        ! Additional CRYOWRF budget components (extracted but not passed to WRF standard interface)
+        ! These are available for diagnostics and future CRYOWRF compatibility:
+        ! - interface_data%budgets%mass_erosion, interface_data%budgets%mass_deposition
+        ! - interface_data%budgets%energy_sw_in, interface_data%budgets%energy_sw_out
+        ! - interface_data%budgets%energy_lw_out, interface_data%budgets%energy_precip
         
         ! Update accumulated variables from budget tracking
         ACSNOM(I,J) = interface_data%budgets%accum_snowmelt

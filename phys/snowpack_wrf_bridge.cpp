@@ -673,12 +673,15 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     *surface_temp = (snow_station->Ndata.size() > 0) ? snow_station->Ndata.back().T : temp_air;  // Surface temperature [K]
     *snow_swe = snow_station->swe;                                  // Snow water equivalent [mm]
     *snow_depth = snow_station->cH;                                // Snow height [m]
-    *heat_flux_sensible = surfFluxes->qs;                          // Sensible heat flux [W/m²]
-    *heat_flux_latent = surfFluxes->ql;                            // Latent heat flux [W/m²]
+    *heat_flux_sensible = -1.0 * surfFluxes->qs;                     // CRYOWRF sign convention (line 1123)
+    *heat_flux_latent = -1.0 * sn_Bdata->ql;                      // CRYOWRF uses boundary layer data (line 1124)
     *albedo = snow_station->Albedo;                                // Surface albedo [0-1]
-    // Snow coverage threshold from CRYOWRF pattern (1mm = 0.001m minimum snow depth)
-    const double snow_coverage_threshold = 0.001;  // 1mm threshold for meaningful snow cover
-    *snow_coverage = (*snow_depth > snow_coverage_threshold) ? 1.0 : 0.0;  // Snow coverage [0-1]
+    // Snow coverage - CRYOWRF pattern (hardcoded to 1.0 following CRYOWRF line 1127)
+    *snow_coverage = 1.0;  // CRYOWRF hardcodes snow coverage to 1.0
+
+    // Extract atmospheric variables (CRYOWRF compatibility)
+    if (friction_velocity) *friction_velocity = Mdata->ustar;  // Friction velocity [m/s]
+    if (stability_param) *stability_param = Mdata->psi_s;      // Stability parameter [dimensionless]
     
     // Consistency checks and fallbacks
     if (*snow_depth > 0.001 && *snow_swe <= 0.0) {
@@ -701,6 +704,7 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
                              int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
                              double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                             double* friction_velocity, double* stability_param,
                              // Layer arrays (max 100 layers)
                              int* n_layers,
                              double* layer_temp, double* layer_thick,
@@ -1157,6 +1161,7 @@ extern "C" void snowpack_physics_layers(double temp_air, double humidity, double
                              int i_grid, int j_grid, double wrf_lat, double wrf_lon,
                              double* snow_swe, double* snow_depth, double* surface_temp,
                              double* heat_flux_sensible, double* heat_flux_latent, double* albedo, double* snow_coverage,
+                             double* friction_velocity, double* stability_param,
                              int* n_layers,
                              double* layer_temp, double* layer_thick,
                              double* layer_vol_ice, double* layer_vol_water, double* layer_vol_air,
@@ -1186,6 +1191,8 @@ extern "C" void snowpack_physics_layers(double temp_air, double humidity, double
         if (heat_flux_latent) *heat_flux_latent = 0.0;          // Initial default
         if (albedo) *albedo = 0.3;                             // Initial default (reasonable albedo)
         if (snow_coverage) *snow_coverage = 0.0;                // Initial default
+        if (friction_velocity) *friction_velocity = 0.0;        // Initial default
+        if (stability_param) *stability_param = 0.0;            // Initial default
         if (n_layers) *n_layers = 0;                           // Initial default
         if (mass_precip) *mass_precip = 0.0;
         if (mass_sublim) *mass_sublim = 0.0;
@@ -1227,6 +1234,7 @@ extern "C" void snowpack_physics_layers(double temp_air, double humidity, double
                             i_grid, j_grid, wrf_lat, wrf_lon,  // Use actual WRF coordinates
                             snow_swe, snow_depth, surface_temp,
                             heat_flux_sensible, heat_flux_latent, albedo, snow_coverage,
+                            friction_velocity, stability_param,
                             n_layers,
                             layer_temp, layer_thick,
                             layer_vol_ice, layer_vol_water, layer_vol_air,
