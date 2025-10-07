@@ -167,8 +167,7 @@
 ! Grid loop - process each grid point  
 !-------------------------------------------------------------------
     
-    WRITE(*,*) 'SNOWPACK-DEBUG [Fortran/module_sf_snowpack.F]: snowpack_driver called, processing grid range i=',its,'-',ite,' j=',jts,'-',jte
-    
+        
     ILOOP: DO i = its, ite
     JLOOP: DO j = jts, jte
 
@@ -198,8 +197,7 @@
       surface_temp_c = REAL(tsk(i,j), C_DOUBLE)
 
       ! Call SNOWPACK physics through C interface with layer diagnostics
-      WRITE(*,*) 'SNOWPACK-DEBUG [Fortran/module_sf_snowpack.F]: Calling C interface for grid (',i,',',j,'), temp=',t_ml
-      CALL snowpack_physics_layers_c( &
+            CALL snowpack_physics_layers_c( &
         REAL(t_ml, C_DOUBLE), REAL(rh, C_DOUBLE), &
         REAL(wind_speed, C_DOUBLE), REAL(wind_dir, C_DOUBLE), &
         REAL(swdown(i,j), C_DOUBLE), REAL(glw(i,j), C_DOUBLE), &
@@ -280,8 +278,7 @@
     END DO JLOOP
     END DO ILOOP
 
-    WRITE(*,*) 'SNOWPACK-DEBUG [Fortran/module_sf_snowpack.F]: snowpack_driver completed successfully'
-
+    
   END SUBROUTINE snowpack_driver
 
 END MODULE module_sf_snowpack

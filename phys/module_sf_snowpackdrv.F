@@ -214,15 +214,6 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     
     ! Initialize WRF simulation time on first call (CRYOWRF pattern)
     IF (.NOT. time_initialized) THEN
-        
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: ========================================'
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: WRF TIME INITIALIZATION STARTING'
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: ========================================'
-        
-        WRITE(*,'(A,I6,A,I3)') 'SNOWPACK-DEBUG: Grid dimensions - ids=', ids, ', determined domain_id=', domain_id
-        WRITE(*,'(A,I3,A,I6)') 'SNOWPACK-DEBUG: Starting time initialization for domain ', &
-                               domain_id, ' at timestep ', itimestep
-        
         ! Initialize variables to detect if nl_get functions fail
         simulation_start_year   = -999
         simulation_start_month  = -999
@@ -230,40 +221,18 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         simulation_start_hour   = -999
         simulation_start_minute = -999
         
-        WRITE(*,'(A,5I12)') 'SNOWPACK-DEBUG: Initialized values (should be -999): ', &
-                            simulation_start_year, simulation_start_month, simulation_start_day, &
-                            simulation_start_hour, simulation_start_minute
-        
+        ! Namelist values will be stored in the variables above
         ! Get actual namelist values using WRF's nl_get_* functions (like CRYOWRF)
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_year...'
         CALL nl_get_start_year   ( domain_id, simulation_start_year   )
-        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_year, value = ', simulation_start_year
         
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_month...'
         CALL nl_get_start_month  ( domain_id, simulation_start_month  )
-        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_month, value = ', simulation_start_month
         
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_day...'
         CALL nl_get_start_day    ( domain_id, simulation_start_day    )
-        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_day, value = ', simulation_start_day
         
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_hour...'
         CALL nl_get_start_hour   ( domain_id, simulation_start_hour   )
-        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_hour, value = ', simulation_start_hour
         
-        WRITE(*,'(A)') 'SNOWPACK-DEBUG: About to call nl_get_start_minute...'
         CALL nl_get_start_minute ( domain_id, simulation_start_minute )
-        WRITE(*,'(A,I12)') 'SNOWPACK-DEBUG: After nl_get_start_minute, value = ', simulation_start_minute
-        
-        WRITE(*,'(A,I3,A,5I12)') 'SNOWPACK-DEBUG: Domain ', domain_id, &
-                                ' final retrieved WRF namelist time: ', &
-                                simulation_start_year, simulation_start_month, simulation_start_day, &
-                                simulation_start_hour, simulation_start_minute
-                                
-        ! Debug: Check if we're dealing with addresses vs values
-        WRITE(*,'(A,Z0)') 'SNOWPACK-DEBUG: Address of simulation_start_year: ', LOC(simulation_start_year)
-        WRITE(*,'(A,I0)') 'SNOWPACK-DEBUG: Value of simulation_start_year: ', simulation_start_year
-        
+          
         ! Validate the retrieved values
         IF (simulation_start_year < 1900 .OR. simulation_start_year > 2100 .OR. &
             simulation_start_month < 1 .OR. simulation_start_month > 12 .OR. &
@@ -297,8 +266,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         
         ! Debug: Print first few grid points to understand coordinate values
         IF (I <= 2 .AND. J <= 2) THEN
-            WRITE(*,'(A,I3,A,I3,A,F10.5,A,F10.5)') &
-                "SNOWPACK-DEBUG [Fortran]: Grid(", I, ",", J, ") XLAT=", XLAT(I,J), " XLONG=", XLONG(I,J)
+            ! Debug prints for first grid points removed
         ENDIF
         
         ! Initialize interface structure
@@ -351,19 +319,21 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         ACSNOM(I,J) = interface_data%budgets%accum_snowmelt
         ACSNOW(I,J) = interface_data%budgets%accum_snowfall
         
-        ! Set standard LSM outputs
-        GRDFLX(I,J) = 0.06     ! Geothermal heat flux [W/m2]
-        SMSTAV(I,J) = 1.0      ! Soil moisture availability
-        SMSTOT(I,J) = 100.0    ! Total soil water [mm]
-        SFCRUNOFF(I,J) = SFCRUNOFF(I,J) + 0.0  ! No surface runoff from SNOWPACK yet
-        UDRUNOFF(I,J) = UDRUNOFF(I,J) + 0.0    ! No subsurface runoff from SNOWPACK yet
+        ! Set standard LSM outputs with proper SNOWPACK extraction
+        GRDFLX(I,J) = interface_data%budgets%energy_ground  ! Ground heat flux from SNOWPACK [W/m2]
+        SMSTAV(I,J) = interface_data%soil%moisture_avail   ! Soil moisture availability from SNOWPACK
+        SMSTOT(I,J) = interface_data%soil%moisture_total   ! Total soil water from SNOWPACK [mm]
+
+        ! Runoff calculations from SNOWPACK mass balance
+        SFCRUNOFF(I,J) = SFCRUNOFF(I,J) + interface_data%budgets%runoff_surface  ! Surface runoff from SNOWPACK
+        UDRUNOFF(I,J) = UDRUNOFF(I,J) + interface_data%budgets%runoff_subsurface ! Subsurface runoff from SNOWPACK
         CANWAT(I,J) = 0.0      ! No canopy water in SNOWPACK
         EMISS(I,J) = 0.98      ! Standard snow/soil emissivity
-        
-        ! Set soil properties (simplified - SNOWPACK handles snow layers)
-        SMOIS(I,1,J) = 0.3  ! Volumetric soil moisture
-        SH2O(I,1,J) = 0.3   ! Liquid soil moisture
-        TSLB(I,1,J) = TSK(I,J)  ! Soil temperature = surface temperature
+
+        ! Set soil properties from SNOWPACK ground interface
+        SMOIS(I,1,J) = interface_data%soil%moisture_volumetric  ! Volumetric soil moisture from SNOWPACK
+        SH2O(I,1,J) = interface_data%soil%moisture_liquid      ! Liquid soil moisture from SNOWPACK
+        TSLB(I,1,J) = interface_data%soil%temperature         ! Soil temperature from SNOWPACK
         
     END DO
     END DO
