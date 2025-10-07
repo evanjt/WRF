@@ -679,9 +679,8 @@ void snowpack_physics(double temp_air, double humidity, double wind_speed, doubl
     // Snow coverage - CRYOWRF pattern (hardcoded to 1.0 following CRYOWRF line 1127)
     *snow_coverage = 1.0;  // CRYOWRF hardcodes snow coverage to 1.0
 
-    // Extract atmospheric variables (CRYOWRF compatibility)
-    if (friction_velocity) *friction_velocity = Mdata->ustar;  // Friction velocity [m/s]
-    if (stability_param) *stability_param = Mdata->psi_s;      // Stability parameter [dimensionless]
+    // Note: Atmospheric variables (friction_velocity, stability_param)
+    // are only available in the enhanced snowpack_physics_layers interface
     
     // Consistency checks and fallbacks
     if (*snow_depth > 0.001 && *snow_swe <= 0.0) {

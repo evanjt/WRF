@@ -108,6 +108,18 @@ TYPE :: PhysicsBudgets
 END TYPE PhysicsBudgets
 
 !-------------------------------------------------------------------
+! Soil state and properties
+!-------------------------------------------------------------------
+TYPE :: SoilState
+    ! Soil moisture variables
+    REAL    :: moisture_avail     ! Soil moisture availability [0-1]
+    REAL    :: moisture_total     ! Total soil water [mm]
+    REAL    :: moisture_volumetric ! Volumetric soil moisture [m³/m³]
+    REAL    :: moisture_liquid    ! Liquid soil moisture [m³/m³]
+    REAL    :: temperature        ! Soil temperature [K]
+END TYPE SoilState
+
+!-------------------------------------------------------------------
 ! Model configuration and control
 !-------------------------------------------------------------------
 TYPE :: ModelConfig
@@ -134,6 +146,7 @@ END TYPE ModelConfig
 TYPE :: SnowpackInterface
     TYPE(AtmosForcing)   :: atmos      ! Atmospheric forcing
     TYPE(SurfaceState)   :: surface    ! Surface state and fluxes
+    TYPE(SoilState)      :: soil       ! Soil state and properties
     TYPE(SnowLayerData)  :: layers     ! Detailed layer information
     TYPE(PhysicsBudgets) :: budgets    ! Mass/energy budget tracking
     TYPE(ModelConfig)    :: config     ! Model configuration
@@ -178,6 +191,13 @@ SUBROUTINE initialize_snowpack_interface(interface_data, itimestep, dt, dx)
     ! Initialize atmospheric variables (CRYOWRF compatibility)
     interface_data%surface%friction_velocity = 0.0
     interface_data%surface%stability_param = 0.0
+
+    ! Initialize soil variables
+    interface_data%soil%moisture_avail = 1.0      ! Maximum availability
+    interface_data%soil%moisture_total = 100.0    ! 100mm total water
+    interface_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture
+    interface_data%soil%moisture_liquid = 0.3     ! All moisture is liquid
+    interface_data%soil%temperature = 273.15      ! Freezing point
     
 END SUBROUTINE initialize_snowpack_interface
 
@@ -448,7 +468,10 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     IF (interface_data%config%enable_energy_budgets) THEN
         CALL update_energy_budgets_structured(interface_data)
     END IF
-    
+
+    ! Update soil state based on surface conditions
+    interface_data%soil%temperature = interface_data%surface%surface_temp  ! Soil temp follows surface temp
+
 END SUBROUTINE snowpack_physics_structured
 
 !-------------------------------------------------------------------
