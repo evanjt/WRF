@@ -25,7 +25,7 @@ namespace SnowpackConstants {
   const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
 }
 
-struct SnowpackObjects {
+struct SnowpackBridgeObjects {
     SnowStation* station;
     Snowpack* instance;
 };
@@ -96,9 +96,56 @@ public:
 
     // Core physics execution
     void execute_snowpack(
-        const MeteoInput& input, 
+        const MeteoInput& input,
         SnowpackOutput& output,
-        SnowpackLayerData* layer_data = nullptr, 
+        SnowpackLayerData* layer_data = nullptr,
         BudgetData* budget_data = nullptr
     );
 };
+
+// Forward declarations for utility functions
+void prepare_meteo_data(const MeteoInput& input,
+                        CurrentMeteo& Mdata,
+                        const mio::Date& current_time,
+                        double current_snow_depth,
+                        const SnowpackConfig* config);
+
+void extract_surface_outputs(const SnowStation& station,
+                             const SurfaceFluxes& fluxes,
+                             const BoundCond& bc,
+                             SnowpackOutput& output,
+                             double temp_air_fallback);
+
+void extract_layer_data(const SnowStation& station, SnowpackLayerData& layer_data);
+
+void extract_budget_data(const SurfaceFluxes& fluxes,
+                        const BoundCond& bc,
+                        double cumu_precip,
+                        const MeteoInput& input,
+                        BudgetData& budget_data);
+
+void advance_simulation_time(const MeteoInput& input,
+                           mio::Date& current_time,
+                           double calculation_step_length);
+
+SnowpackBridgeObjects create_station_objects(const MeteoInput& input,
+                                           SnowpackBridge& bridge);
+
+void ensure_station_initialized(SnowStation* station,
+                                const MeteoInput& input,
+                                SnowpackBridge& bridge);
+
+bool save_station_state(SnowStation* station,
+                       const mio::Date& current_time,
+                       SnowpackIO* io,
+                       int i_grid,
+                       int j_grid);
+
+void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowStation>>& stations,
+                             const mio::Date& current_time,
+                             SnowpackIO* io);
+
+void validate_output_values(const SnowpackOutput& output, int i_grid, int j_grid);
+
+void validate_layer_data(const SnowpackLayerData& layer_data, int i_grid, int j_grid);
+

@@ -1,3 +1,6 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
 #include <string>
 
 #include "meteoio/meteoio/MeteoIO.h"
@@ -12,3 +15,5 @@ public:
     static void validateConfiguration(const mio::Config& cfg);
     static std::string getDefaultConfigPath();
 };
+
+#endif // CONFIG_H

@@ -1,3 +1,6 @@
+#ifndef SNOWPACK_BRIDGE_STRUCTS_H
+#define SNOWPACK_BRIDGE_STRUCTS_H
+
 // Data structures for organized parameter passing
 struct MeteoInput {
     double temp_air;
@@ -58,3 +61,5 @@ struct BudgetData {
     double energy_rain;
     double energy_total;
 };
+
+#endif // SNOWPACK_BRIDGE_STRUCTS_H
