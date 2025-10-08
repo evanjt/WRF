@@ -289,18 +289,30 @@ submodules :
 	fi
 	@echo Initializing SNOWPACK submodules
 	@( cd .. ; git submodule update --init --recursive )
-	@echo Cleaning previous SNOWPACK builds
-	@rm -rf snowpack/meteoio/build snowpack/snowpack/build
-	@echo Building MeteoIO library
-	@( cd snowpack/meteoio && mkdir -p build lib && cd build && \
-	  cmake .. -DCMAKE_BUILD_TYPE=Release && make -j 32 )
-	@echo Building SNOWPACK library
-	@( cd snowpack/snowpack && mkdir -p build lib && cd build && \
-	  cmake .. -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/build && \
-	  make -j 32 )
+	@echo Checking SNOWPACK libraries
+	@if [ ! -f snowpack/meteoio/build/lib/libmeteoio.so ] || [ ! -f snowpack/snowpack/build/lib/libsnowpack.so ]; then \
+		echo "Building missing SNOWPACK libraries"; \
+		if [ ! -d snowpack/meteoio/build ]; then \
+			echo "Building MeteoIO library"; \
+			( cd snowpack/meteoio && mkdir -p build lib && cd build && \
+			  cmake .. -DCMAKE_BUILD_TYPE=Release && make -j 32 ); \
+		else \
+			echo "MeteoIO library already built"; \
+		fi; \
+		if [ ! -d snowpack/snowpack/build ]; then \
+			echo "Building SNOWPACK library"; \
+			( cd snowpack/snowpack && mkdir -p build lib && cd build && \
+			  cmake .. -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/build && \
+			  make -j 32 ); \
+		else \
+			echo "SNOWPACK library already built"; \
+		fi; \
+	else \
+		echo "SNOWPACK libraries already built - skipping"; \
+	fi
 
 # C++ object compilation for SNOWPACK interface
-snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp submodules
+snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp
 	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
 
 # Fortran module dependencies for SNOWPACK interface

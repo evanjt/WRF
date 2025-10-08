@@ -1,0 +1,25 @@
+# Development Dockerfile for fast WRF rebuilding
+# Inherits from the main wrf-snpack image and only rebuilds WRF with modified files
+
+FROM wrf-snpack AS dev-build
+LABEL description="Fast WRF development rebuild environment"
+ENV BASE_DIR=/home/wrfuser/wrf-build \
+    NETCDF=${BASE_DIR}/libs/netcdf \
+    JASPERLIB=${BASE_DIR}/libs/grib2/lib \
+    JASPERINC=${BASE_DIR}/libs/grib2/include \
+    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/snowpack/snowpack/lib:${BASE_DIR}/WRF/phys/snowpack/meteoio/lib" \
+    PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
+
+USER wrfuser
+WORKDIR ${BASE_DIR}
+
+# Copy only the modified phys directory for fast rebuild
+COPY --chown=wrfuser:wrfuser phys/ ${BASE_DIR}/WRF/phys/
+
+WORKDIR ${BASE_DIR}/WRF
+RUN ./compile em_real -j 20 
+
+# Set working directory for development
+WORKDIR /home/wrfuser
+
+ENTRYPOINT ["/bin/bash"]

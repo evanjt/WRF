@@ -326,6 +326,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         ACSNOW(I,J) = interface_data%budgets%accum_snowfall
         
         ! Set standard LSM outputs with proper SNOWPACK extraction
+        ! CRYOWRF SOURCE: Energy balance and soil moisture from CRYOWRF land surface scheme
         GRDFLX(I,J) = interface_data%budgets%energy_ground  ! Ground heat flux from SNOWPACK [W/m2]
         SMSTAV(I,J) = interface_data%soil%moisture_avail   ! Soil moisture availability from SNOWPACK
         SMSTOT(I,J) = interface_data%soil%moisture_total   ! Total soil water from SNOWPACK [mm]
@@ -337,6 +338,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         EMISS(I,J) = 0.98      ! Standard snow/soil emissivity
 
         ! Set soil properties from SNOWPACK ground interface
+        ! CRYOWRF SOURCE: Soil layer initialization from CRYOWRF ground interface module
         SMOIS(I,1,J) = interface_data%soil%moisture_volumetric  ! Volumetric soil moisture from SNOWPACK
         SH2O(I,1,J) = interface_data%soil%moisture_liquid      ! Liquid soil moisture from SNOWPACK
         TSLB(I,1,J) = interface_data%soil%temperature         ! Soil temperature from SNOWPACK
