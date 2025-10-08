@@ -1,0 +1,73 @@
+# Docker build optimization - exclude unnecessary files
+
+# Git metadata (large and not needed)
+.git/
+.gitignore
+
+# Documentation (not needed for build)
+*.md
+README*
+CITATION*
+doc/
+docs/
+
+# Build artifacts (will be created during build)
+*.o
+*.mod
+*.a
+*.exe
+compile.log*
+configure.log*
+compile_log
+log.*
+
+# Test outputs (but keep test/ directory structure)
+rsl.out.*
+rsl.error.*
+namelist.output*
+# Exclude test output files within test directories
+test/*/rsl.out.*
+test/*/rsl.error.*
+test/*/wrfout_*
+test/*/wrfinput_*
+test/*/wrfbdy_*
+
+# Temporary files
+*~
+*.tmp
+*.swp
+*.bak
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-*
+
+# Mac files
+.DS_Store
+
+# Development scripts not needed in container
+test_*.sh
+*_test.sh
+build_*.sh
+check_*.sh
+debug_*.sh
+
+# Old/backup versions
+*.orig
+*.backup
+*_old
+*_backup
+
+# Large data files (add real data outside container)
+*.nc
+*.grb
+*.grib*
+*.bin
+met_em.*
+geo_em.*
+
+# Docker build files that shouldn't be copied recursively
+Dockerfile*
+.dockerignore
+docker-compose.*

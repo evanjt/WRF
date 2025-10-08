@@ -3588,6 +3588,8 @@
          model_config_rec % num_soil_layers = 4
       ELSE IF (   model_config_rec % sf_surface_physics(1) .EQ. SSIBSCHEME   ) THEN
          model_config_rec % num_soil_layers = 3
+      ELSE IF (   model_config_rec % sf_surface_physics(1) .EQ. SNOWPACKSCHEME   ) THEN
+         model_config_rec % num_soil_layers = 4
       ELSE
          CALL wrf_debug       ( 0 , '--- ERROR: Unknown sf_surface_physics has no associated number of soil levels' )
          WRITE (wrf_err_message, FMT='(A,I6)') '--- ERROR: sf_surface_physics = ' , model_config_rec % sf_surface_physics(1)
