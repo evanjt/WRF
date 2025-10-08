@@ -258,15 +258,34 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode)
     END IF
 
+    ! Debug: Print loop bounds to identify coordinate corruption
+    WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-DEBUG: Loop bounds its,ite,jts,jte = ', its, ite, jts, jte
+
+    ! Safety check: Verify loop bounds are reasonable
+    IF (its < 0 .OR. ite < 0 .OR. jts < 0 .OR. jte < 0) THEN
+        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Negative loop bounds detected! its,ite,jts,jte = ', its, ite, jts, jte
+        RETURN
+    ENDIF
+
+    IF (its > ite .OR. jts > jte) THEN
+        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Invalid loop bounds (start > end)! its,ite,jts,jte = ', its, ite, jts, jte
+        RETURN
+    ENDIF
+
+    IF (ite > 10000 .OR. jte > 10000) THEN
+        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Loop bounds too large! its,ite,jts,jte = ', its, ite, jts, jte
+        RETURN
+    ENDIF
+
     ! Grid loop with structured data approach
     DO J = jts,jte
     DO I = its,ite
         ! Skip water points
         IF((XLAND(I,J)-1.5) >= 0.) CYCLE
-        
+
         ! Debug: Print first few grid points to understand coordinate values
         IF (I <= 2 .AND. J <= 2) THEN
-            ! Debug prints for first grid points removed
+            WRITE(*,'(A,I10,I10)') 'SNOWPACK-DEBUG: Processing grid point I,J = ', I, J
         ENDIF
         
         ! Initialize interface structure

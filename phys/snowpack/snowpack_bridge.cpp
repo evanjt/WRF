@@ -262,6 +262,14 @@ void SnowpackBridge::execute_snowpack(
     SnowpackLayerData* layer_data,
     BudgetData* budget_data
 ) {
+    // Validate grid coordinates first
+    if (input.i_grid < 0 || input.i_grid > 10000 || input.j_grid < 0 || input.j_grid > 10000) {
+        printf("SNOWPACK-ERROR: Invalid grid coordinates (%d,%d) - outside expected range [0-10000]\n",
+               input.i_grid, input.j_grid);
+        printf("SNOWPACK-ERROR: This indicates a problem with WRF loop bounds initialization\n");
+        return;
+    }
+
     // Track physics calls for debugging
     if (++execute_call_count_ <= 5 || (execute_call_count_ % 1000 == 0)) {
         printf("SNOWPACK-INFO: Execute snowpack call #%d - Grid (%d,%d)\n", execute_call_count_, input.i_grid, input.j_grid);
@@ -352,6 +360,22 @@ void SnowpackBridge::initialize_config(const std::string& ini_path) {
         SnowpackConfigManager::validateConfiguration(file_config);
 
         config_ = std::unique_ptr<SnowpackConfig>(new SnowpackConfig(file_config));
+
+        // IMPORTANT: Ensure METEO_STEP_LENGTH is available in the final config
+        // SnowpackConfig might re-read the ini file, so we need to inject METEO_STEP_LENGTH again
+        const double calculation_step_length = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
+        const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds
+
+        std::stringstream ss_meteo_length;
+        ss_meteo_length << meteo_step_length;
+        config_->addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
+
+        // Verify it was added
+        std::string verify_value;
+        config_->getValue("METEO_STEP_LENGTH", "Snowpack", verify_value);
+        printf("SNOWPACK-CONFIG: Final METEO_STEP_LENGTH set to %s seconds (from CALCULATION_STEP_LENGTH=%.1f minutes)\n",
+               verify_value.c_str(), calculation_step_length);
+
         io_ = std::unique_ptr<SnowpackIO>(new SnowpackIO(*config_));
 
         config_file_path_ = ini_path;
