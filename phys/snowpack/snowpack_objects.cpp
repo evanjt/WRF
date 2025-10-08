@@ -208,7 +208,9 @@ void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowSta
     }
 
     int saved_count = 0;
-    for (const auto& [key, station] : stations) {
+    for (auto it = stations.begin(); it != stations.end(); ++it) {
+        const std::string& key = it->first;
+        SnowStation* station = it->second.get();
         try {
             // Parse grid key "i_j" back to i,j coordinates
             size_t underscore_pos = key.find('_');

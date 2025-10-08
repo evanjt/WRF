@@ -168,6 +168,9 @@ MODULES = \
 	module_sf_snowpackdrv.o \
 	module_sf_snowpack.o \
 	snowpack/snowpack_bridge.o \
+	snowpack/snowpack_objects.o \
+	snowpack/config.o \
+	snowpack/snowpack_utils.o \
 	module_sf_sfcdiags.o \
 	module_sf_sfcdiags_ruclsm.o \
 	module_sf_sstskin.o \
@@ -324,3 +327,13 @@ clean:
 # DO NOT DELETE
 
 include ../main/depend.common
+
+# Additional C++ object compilation for SNOWPACK interface
+snowpack/snowpack_objects.o: snowpack/snowpack_objects.cpp snowpack/snowpack_bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+
+snowpack/config.o: snowpack/config.cpp snowpack/config.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+
+snowpack/snowpack_utils.o: snowpack/snowpack_utils.cpp snowpack/snowpack_bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<

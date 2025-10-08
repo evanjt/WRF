@@ -319,44 +319,7 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     USE, INTRINSIC :: iso_c_binding
     TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
     
-    ! C interface declaration (avoiding circular dependency)
-    INTERFACE
-        SUBROUTINE snowpack_physics_layers_c( &
-            temp_air, humidity, wind_speed, wind_dir, &
-            shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-            i_grid, j_grid, wrf_lat, wrf_lon, &
-            snow_swe, snow_depth, surface_temp, &
-            heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
-            friction_velocity, stability_param, &
-            n_layers, &
-            layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
-            layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
-            mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze, &
-            energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out, &
-            energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total) BIND(C, name="snowpack_physics_layers")
-          
-          USE, INTRINSIC :: iso_c_binding
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: temp_air, humidity, wind_speed, wind_dir
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
-          INTEGER(C_INT), VALUE, INTENT(IN) :: i_grid, j_grid
-          REAL(C_DOUBLE), VALUE, INTENT(IN) :: wrf_lat, wrf_lon
-          
-          REAL(C_DOUBLE), INTENT(INOUT) :: snow_swe, snow_depth, surface_temp
-          REAL(C_DOUBLE), INTENT(OUT) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
-          REAL(C_DOUBLE), INTENT(OUT) :: friction_velocity, stability_param
-          
-          INTEGER(C_INT), INTENT(OUT) :: n_layers
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_temp(100), layer_thick(100)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_vol_ice(100), layer_vol_water(100), layer_vol_air(100)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_grain_radius(100), layer_bond_radius(100)
-          REAL(C_DOUBLE), INTENT(OUT) :: layer_dendricity(100), layer_sphericity(100)
-          REAL(C_DOUBLE), INTENT(OUT) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
-          REAL(C_DOUBLE), INTENT(OUT) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
-          REAL(C_DOUBLE), INTENT(OUT) :: energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
-          
-        END SUBROUTINE snowpack_physics_layers_c
-    END INTERFACE
-    
+        
     ! Local variables for C interface
     REAL(8) :: temp_air, humidity, wind_speed, wind_dir
     REAL(8) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
@@ -395,23 +358,25 @@ SUBROUTINE snowpack_physics_structured(interface_data)
     i_grid = interface_data%config%i_grid
     j_grid = interface_data%config%j_grid
     
-    snow_swe = DBLE(interface_data%surface%snow_swe)
-    snow_depth = DBLE(interface_data%surface%snow_depth)
-    
-    ! Call SNOWPACK physics with layer extraction
-    CALL snowpack_physics_layers_c(temp_air, humidity, wind_speed, wind_dir, &
-                                   shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-                                   i_grid, j_grid, DBLE(interface_data%atmos%latitude), DBLE(interface_data%atmos%longitude), &
-                                   snow_swe, snow_depth, surface_temp, &
-                                   heat_flux_sensible, heat_flux_latent, albedo, snow_coverage, &
-                                   friction_velocity, stability_param, &
-                                   n_layers, &
-                                   layer_temp, layer_thick, layer_vol_ice, layer_vol_water, layer_vol_air, &
-                                   layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity, &
-                                   mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze, &
-                                   energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out, &
-                                   energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total)
-    
+    ! Use the clean structured interface - build MeteoInput from interface_data
+    ! Note: We need to pass C structures by reference, so we'll need to create C bindings
+    ! for the Fortran interface_data structure. For now, use individual parameters.
+
+    ! Direct call to clean C++ interface (individual parameters for compatibility)
+    CALL snowpack_physics_individual_c(temp_air, humidity, wind_speed, wind_dir, &
+                                       shortwave_in, longwave_in, precipitation, pressure, height, dt, &
+                                       i_grid, j_grid, DBLE(interface_data%atmos%latitude), DBLE(interface_data%atmos%longitude), &
+                                       snow_swe, snow_depth, surface_temp, &
+                                       heat_flux_sensible, heat_flux_latent, albedo, snow_coverage)
+
+    ! Extract layer data using the clean extraction interface (convert double precision to single precision)
+    CALL extract_snowpack_layers_c(i_grid, j_grid, &
+                                   REAL(layer_temp, 4), REAL(layer_thick, 4), &
+                                   REAL(layer_vol_ice, 4), REAL(layer_vol_water, 4), REAL(layer_vol_air, 4), &
+                                   REAL(layer_grain_radius, 4), REAL(layer_bond_radius, 4), &
+                                   REAL(layer_dendricity, 4), REAL(layer_sphericity, 4), &
+                                   n_layers)
+
     ! Unpack surface results back to interface structure
     interface_data%surface%snow_swe = REAL(snow_swe)
     interface_data%surface%snow_depth = REAL(snow_depth) 
