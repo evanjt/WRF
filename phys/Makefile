@@ -167,7 +167,7 @@ MODULES = \
 	module_snowpack_types.o \
 	module_sf_snowpackdrv.o \
 	module_sf_snowpack.o \
-	snowpack_wrf_bridge.o \
+	snowpack/snowpack_bridge.o \
 	module_sf_sfcdiags.o \
 	module_sf_sfcdiags_ruclsm.o \
 	module_sf_sstskin.o \
@@ -312,7 +312,7 @@ submodules :
 	fi
 
 # C++ object compilation for SNOWPACK interface
-snowpack_wrf_bridge.o: snowpack_wrf_bridge.cpp
+snowpack/snowpack_bridge.o: snowpack/snowpack_bridge.cpp snowpack/snowpack_bridge.h
 	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
 
 # Fortran module dependencies for SNOWPACK interface

@@ -17,118 +17,254 @@
 #include <sys/stat.h>
 #include <errno.h>
 
-#include "snowpack/meteoio/meteoio/MeteoIO.h"
-#include "snowpack/snowpack/snowpack/DataClasses.h"
-#include "snowpack/snowpack/snowpack/SnowpackConfig.h"
-#include "snowpack/snowpack/snowpack/snowpackCore/Snowpack.h"
-#include "snowpack/snowpack/snowpack/plugins/SnowpackIO.h"
+#include "snowpack_bridge.h"
+#include "config.h"
+#include "meteoio/meteoio/MeteoIO.h"
+#include "snowpack/snowpack/DataClasses.h"
+#include "snowpack/snowpack/SnowpackConfig.h"
+#include "snowpack/snowpack/snowpackCore/Snowpack.h"
+#include "snowpack/snowpack/plugins/SnowpackIO.h"
 
-class SnowpackConfigManager {
-public:
-    static mio::Config loadConfiguration(const std::string& ini_file_path);
-    static void validateConfiguration(const mio::Config& cfg);
-    static std::string getDefaultConfigPath();
-};
+// // Global configuration and I/O (shared, read-only)
+// static std::unique_ptr<SnowpackConfig> global_config;
+// static std::unique_ptr<SnowpackIO> global_snowpack_io;
+// static bool config_initialized = false;
+// static std::string config_file_path;
 
-// Global configuration and I/O (shared, read-only)
-static std::unique_ptr<SnowpackConfig> global_config;
-static std::unique_ptr<SnowpackIO> global_snowpack_io;
-static bool config_initialized = false;
-static std::string config_file_path;
+// // Global time management (CRYOWRF pattern)
+// static mio::Date current_simulation_date;      // Current WRF simulation time
+// static bool time_initialized = false;          // Track initialization
+// static double calculation_step_length = 0.0;   // Read from SNOWPACK config (minutes)
 
-// Global time management (CRYOWRF pattern)
-static mio::Date current_simulation_date;      // Current WRF simulation time
-static bool time_initialized = false;          // Track initialization
-static double calculation_step_length = 0.0;   // Read from SNOWPACK config (minutes)
+// // Persistent SnowStation storage per grid point (CRYOWRF pattern)
+// // Key format: "i_j" (e.g., "125_67" for grid point i=125, j=67)
+// static std::map<std::string, std::unique_ptr<SnowStation>> grid_snowstations;
+// static std::map<std::string, std::unique_ptr<Snowpack>> grid_snowpack_instances;
+// static bool persistent_objects_initialized = false;
 
-// Persistent SnowStation storage per grid point (CRYOWRF pattern)
-// Key format: "i_j" (e.g., "125_67" for grid point i=125, j=67)
-static std::map<std::string, std::unique_ptr<SnowStation>> grid_snowstations;
-static std::map<std::string, std::unique_ptr<Snowpack>> grid_snowpack_instances;
-static bool persistent_objects_initialized = false;
 
-namespace SnowpackConstants {
-  // Temperature sanity checks [K] - prevents solver instabilities
-  // Values will be overridden by config if T_CRAZY_MAX/T_CRAZY_MIN are defined
-  constexpr double T_CRAZY_MAX_KELVIN = 400.0;  //  127°C - configurable via T_CRAZY_MAX
-  constexpr double T_CRAZY_MIN_KELVIN = 100.0;  // -173°C - configurable via T_CRAZY_MIN
+void SnowpackBridge::initialize_time(
+    int start_year, 
+    int start_month, 
+    int start_day,
+    int start_hour,
+    int start_minute
+) {
+    if (time_initialized_) {
+        return;
+    }
 
-  // Physical thresholds - can be overridden by configuration
-  constexpr double PRECIP_PHASE_THRESHOLD_K = 273.65;  // 0.5°C threshold for snow/rain
-  constexpr double BOTTOM_TEMP_OFFSET_K = 5.0;         // Offset below air temp for ground temp
-  constexpr double SNOW_DENSITY_FALLBACK = 100.0;      // kg/m³ fallback density
+    if (!config_initialized_) {
+        throw std::runtime_error("Configuration must be initialized before time");
+    }
 
-  // Default station metadata
-  const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
-}
-
-// SnowpackConfigManager implementation
-mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file_path) {
     try {
-        // Check if file exists first
-        std::ifstream test_file(ini_file_path);
-        if (!test_file.good()) {
-            char cwd[1024];
-            getcwd(cwd, sizeof(cwd));
-            throw std::runtime_error("io.ini file not found");
-        }
-        test_file.close();
+        current_simulation_date_ = mio::Date(start_year, start_month, start_day,
+                                           start_hour, start_minute, 0.0, 0.0);
 
-        mio::Config config(ini_file_path);
-        // Following exact CRYOWRF pattern: meteo_step_length = M_TO_S(calculation_step_length)
-        const double calculation_step_length = config.get("CALCULATION_STEP_LENGTH", "Snowpack");
-        const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds
+        // Get calculation step length from configuration (in minutes)
+        calculation_step_length_ = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
+        time_initialized_ = true;
 
-        // Add METEO_STEP_LENGTH to config dynamically (CRYOWRF pattern)
-        std::stringstream ss_meteo_length;
-        ss_meteo_length << meteo_step_length;
-        config.addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
-        return config;
+        printf("SNOWPACK-INFO: Time initialized to %04d-%02d-%02d %02d:%02d\n",
+               start_year, start_month, start_day, start_hour, start_minute);
+
     } catch (const std::exception& e) {
-        printf("SNOWPACK-ERROR [C++/SnowpackConfigManager]: Failed to load %s: %s\n", ini_file_path.c_str(), e.what());
+        printf("SNOWPACK-FATAL: Time initialization failed: %s\n", e.what());
         throw;
     }
 }
 
-void SnowpackConfigManager::validateConfiguration(const mio::Config& cfg) {
-    // Check for essential SNOWPACK parameters that will be read by SNOWPACK components
-    std::vector<std::pair<std::string, std::string>> required_params = {
-        {"CALCULATION_STEP_LENGTH", "Snowpack"},
-        {"FORCING", "Snowpack"},
-        {"SNP_SOIL", "Snowpack"},
-        {"SOIL_FLUX", "Snowpack"},
-        {"CANOPY", "Snowpack"},                 // Required by Snowpack.cc:174
-        {"HEIGHT_OF_METEO_VALUES", "Snowpack"}, // Required by Snowpack.cc:179
-        {"HEIGHT_OF_WIND_VALUE", "Snowpack"},   // Required by Meteo.cc:56
-        {"ROUGHNESS_LENGTH", "Snowpack"},       // Required by Meteo.cc:50
-        {"SW_MODE", "Snowpack"},                // Common requirement
-        {"ATMOSPHERIC_STABILITY", "Snowpack"},  // Required by Meteo.cc:44
-        {"GEO_HEAT", "Snowpack"},               // Required for energy balance
-        {"VARIANT", "SnowpackAdvanced"}
-    };
+// SnowStation* SnowpackBridge::get_or_create_snowstation(int i_grid, int j_grid, int wrf_domain_id,
+//                                                       double wrf_lat, double wrf_lon, double wrf_alt) {
+//     std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_" + std::to_string(wrf_domain_id) +
+//                              "_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
 
-    for (const auto& param : required_params) {
-        try {
-            std::string value;
-            cfg.getValue(param.first, param.second, value);
-        } catch (const std::exception& e) {
-            printf("SNOWPACK-ERROR [C++/SnowpackConfigManager]: Missing required parameter %s::%s\n",
-                   param.second.c_str(), param.first.c_str());
-            throw std::runtime_error("Configuration validation failed: missing " + param.first);
-        }
-    }
+//     auto it = grid_snowstations_.find(station_key);
+//     if (it != grid_snowstations_.end()) {
+//         return it->second.get();
+//     }
+
+//     auto station = std::make_unique<SnowStation>();
+//     station->setMeteoStationName(station_key);
+//     station->setPosition(wrf_lat, wrf_lon, wrf_alt);
+
+//     SnowStation* station_ptr = station.get();
+//     grid_snowstations_[station_key] = std::move(station);
+
+//     return station_ptr;
+// }
+
+Snowpack* SnowpackBridge::get_or_create_snowpack_instance(int i_grid, int j_grid,
+                                                        double wrf_lat, double wrf_lon, double wrf_alt) {
+    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+
+    auto it = grid_snowpack_instances_.find(station_key);
+    if (it != grid_snowpack_instances_.end()) {
+        return it->second.get();
     }
 
-std::string SnowpackConfigManager::getDefaultConfigPath() {
-    // Allow environment variable override for config path
-    const char* config_env = std::getenv("SNOWPACK_CONFIG_PATH");
-    if (config_env) {
-        printf("SNOWPACK-INFO: Using config path from environment: %s\n", config_env);
-        return std::string(config_env);
-    }
-    return "./io.ini";  // Default path in WRF run directory
+    auto snowpack = std::make_unique<Snowpack>();
+    Snowpack* snowpack_ptr = snowpack.get();
+    grid_snowpack_instances_[station_key] = std::move(snowpack);
+
+    return snowpack_ptr;
 }
 
+SnowStation* SnowpackBridge::get_existing_snowstation(int i_grid, int j_grid) {
+    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+
+    auto it = grid_snowstations_.find(station_key);
+    if (it != grid_snowstations_.end()) {
+        return it->second.get();
+    }
+
+    return nullptr; // Station doesn't exist
+}
+
+void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
+    if (!io_ || !config_initialized_) {
+        return;
+    }
+
+    std::string station_key = STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    auto station_it = grid_snowstations_.find(station_key);
+
+    if (station_it != grid_snowstations_.end()) {
+        try {
+            io_->writeSnowStation(*(station_it->second), current_simulation_date_);
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-ERROR: Failed to save state for grid (%d,%d): %s\n",
+                   i_grid, j_grid, e.what());
+        }
+    }
+}
+
+void SnowpackBridge::save_all_snowpack_states() {
+    if (!io_ || !config_initialized_) {
+        printf("SNOWPACK-WARNING: Cannot save states - IO not initialized\n");
+        return;
+    }
+
+    int saved_count = 0;
+    for (const auto& [key, station] : grid_snowstations_) {
+        try {
+            io_->writeSnowStation(*station, current_simulation_date_);
+            saved_count++;
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-ERROR: Failed to save state for %s: %s\n", key.c_str(), e.what());
+        }
+    }
+
+    printf("SNOWPACK-INFO: Saved %d snowpack states to disk\n", saved_count);
+}
+
+// Get or create persistent SNOWPACK objects for grid point
+SnowpackObjects get_snowpack_objects(const MeteoInput& input) {
+    initialize_snowpack_config();
+    SnowpackObjects objects;
+    
+    objects.station = get_or_create_snowstation(input.i_grid, input.j_grid, 1, input.wrf_lat, input.wrf_lon, input.height);
+    if (!objects.station) {
+        printf("SNOWPACK-FATAL [%d,%d]: snow_station pointer is null!\n", input.i_grid, input.j_grid);
+        std::abort();
+    }
+    
+    objects.instance = get_or_create_snowpack_instance(input.i_grid, input.j_grid, input.wrf_lat, input.wrf_lon, input.height);
+    if (!objects.instance) {
+        printf("SNOWPACK-FATAL [%d,%d]: snowpack_instance pointer is null!\n", input.i_grid, input.j_grid);
+        std::abort();
+    }
+
+    return objects;
+}
+void SnowpackBridge::execute_snowpack(
+    const MeteoInput& input,
+    SnowpackOutput& output,
+    SnowpackLayerData* layer_data,
+    BudgetData* budget_data
+) {
+    // Track physics calls for debugging
+    if (++execute_call_count_ <= 5 || (execute_call_count_ % 1000 == 0)) {
+        printf("SNOWPACK-INFO: Execute snowpack call #%d - Grid (%d,%d)\n", execute_call_count_, input.i_grid, input.j_grid);
+    }
+
+    // Get persistent SNOWPACK objects
+    SnowpackObjects objects = get_snowpack_objects(input);
+
+    // Initialize station if needed
+    if (objects.station->getNumberOfElements() == 0) {
+        SN_SNOWSOIL_DATA ssdata;
+        mio::Coords position;
+        position.setLatLon(input.wrf_lat, input.wrf_lon, input.height);
+        std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" + std::to_string(input.i_grid) + "_" + std::to_string(input.j_grid);
+        std::string stationName = "WRF Grid Point " + std::to_string(input.i_grid) + "," + std::to_string(input.j_grid);
+        ssdata.meta.setStationData(position, stationID, stationName);
+        ssdata.Height = input.height;
+        ssdata.nN = 1;
+        ssdata.nLayers = 0;
+        objects.station->initialize(ssdata, 0);
+    }
+
+    // Initialize time step
+    bool time_advanced = initialize_time_step(input);
+
+    // Create meteorological data
+    auto Mdata = std::make_unique<CurrentMeteo>();
+    auto surfFluxes = std::make_unique<SurfaceFluxes>();
+    auto sn_Bdata = std::make_unique<BoundCond>();
+
+    // Prepare meteorological data
+    double current_snow_depth = (execute_call_count_ > 1) ? objects.station->cH : 0.0;
+    prepare_meteorological_data(input, Mdata.get(), current_snow_depth);
+
+    // Execute SNOWPACK physics
+    double cumu_precip = 0.0;
+    if (time_advanced) {
+        objects.instance->runSnowpackModel(*Mdata, *objects.station, cumu_precip, *sn_Bdata, *surfFluxes);
+    }
+
+    // Collect surface fluxes
+    try {
+        surfFluxes->collectSurfaceFluxes(*sn_Bdata, *objects.station, *Mdata);
+    } catch (const std::exception& e) {
+        printf("SNOWPACK-ERROR: Exception in collectSurfaceFluxes: %s\n", e.what());
+    }
+
+    // Extract results
+    size_t ndata_size = objects.station->Ndata.size();
+    output.surface_temp = (ndata_size > 0) ? objects.station->Ndata.back().T : input.temp_air;
+    output.snow_swe = objects.station->swe;
+    output.snow_depth = objects.station->cH - objects.station->Ground;
+    output.heat_flux_sensible = -1.0 * surfFluxes->qs;
+    output.heat_flux_latent = -1.0 * sn_Bdata->ql;
+    output.albedo = objects.station->Albedo;
+    output.snow_coverage = 1.0;
+    output.friction_velocity = Mdata->ustar;
+    output.stability_param = 0.0;
+
+    // Consistency check
+    if (output.snow_depth > 0.001 && output.snow_swe <= 0.0) {
+        output.snow_swe = output.snow_depth * SnowpackConstants::SNOW_DENSITY_FALLBACK;
+    }
+
+    // // Extract detailed data if requested
+    // if (layer_data) {
+    //     extract_layer_data(objects.station, *layer_data);
+    // }
+
+    // if (budget_data) {
+    //     extract_budget_data(*surfFluxes, *sn_Bdata, cumu_precip, input.longwave_in,
+    //                         input.shortwave_in, output.albedo, input.dt, *budget_data);
+    //     budget_data->mass_swe = output.snow_swe;
+    // }
+
+    validate_outputs(output, input);
+
+}
+
+// Global singleton instance for Fortran compatibility
+SnowpackBridge& g_snowpack_bridge = SnowpackBridge::instance();
 
 void initialize_snowpack_config_with_path(const std::string& ini_path);
 
@@ -145,39 +281,25 @@ void initialize_snowpack_config() {
     initialize_snowpack_config_with_path(SnowpackConfigManager::getDefaultConfigPath());
 }
 
-// Initialize SNOWPACK configuration with specific file path
-void initialize_snowpack_config_with_path(const std::string& ini_path) {
-
-    if (config_initialized) {
+void SnowpackBridge::initialize_config(const std::string& ini_path) {
+    if (config_initialized_) {
         return;
     }
 
     try {
+        mio::Config file_config = SnowpackConfigManager::loadConfiguration(ini_path);
+        SnowpackConfigManager::validateConfiguration(file_config);
 
-        mio::Config file_config = SnowpackConfigManager::loadConfiguration(ini_path);   // Load configuration from file
-        SnowpackConfigManager::validateConfiguration(file_config);                      // Validate essential parameters
-        global_config = std::make_unique<SnowpackConfig>(file_config);                  // Create SnowpackConfig from file
-        global_snowpack_io = std::make_unique<SnowpackIO>(*global_config);              // Create SnowpackIO instance for state persistence
+        config_ = std::make_unique<SnowpackConfig>(file_config);
+        io_ = std::make_unique<SnowpackIO>(*config_);
 
+        config_file_path_ = ini_path;
+        config_initialized_ = true;
 
-        // ensure_snowpack_states_directory();// Ensure directory exists for .sno file persistence
-
-        config_file_path = ini_path;
-        config_initialized = true;
-
-        // Extract and report key settings
-        std::string calc_step, snp_soil;
-        file_config.getValue("CALCULATION_STEP_LENGTH", "Snowpack", calc_step);
-        file_config.getValue("SNP_SOIL", "Snowpack", snp_soil);
-
-        // Update global calculation step length from config (no hardcoded values)
-        calculation_step_length = std::stod(calc_step);
-        config_initialized = true;
+        printf("SNOWPACK-INFO: Configuration initialized from %s\n", ini_path.c_str());
 
     } catch (const std::exception& e) {
-        printf("SNOWPACK-FATAL [C++/snowpack_wrf_bridge.cpp]: Configuration failed for %s: %s\n",
-               ini_path.c_str(), e.what());
-        printf("SNOWPACK-FATAL: Unable to load SNOWPACK configuration - WRF run will abort\n");
+        printf("SNOWPACK-FATAL: Configuration failed for %s: %s\n", ini_path.c_str(), e.what());
         throw;
     }
 }
@@ -187,12 +309,13 @@ std::string generate_grid_key(int i_grid, int j_grid) {
     return std::to_string(i_grid) + "_" + std::to_string(j_grid);
 }
 
-SnowStation* get_or_create_snowstation(
+SnowStation* SnowpackBridge::get_or_create_snowstation(
     int i_grid, int j_grid, int wrf_domain_id, double wrf_lat, double wrf_lon, double wrf_alt
 ) {
     station_creation_calls++;
     initialize_snowpack_config();
     std::string grid_key = generate_grid_key(i_grid, j_grid);
+    bool use_canopy, use_soil;
 
     // Check if SnowStation already exists for this grid point
     auto station_it = grid_snowstations.find(grid_key);
@@ -202,7 +325,6 @@ SnowStation* get_or_create_snowstation(
 
     // Create new SnowStation for this grid point - read configuration for correct parameters
     // MeteoIO handles boolean parsing - accepts false/FALSE/0 or true/TRUE/1
-    bool use_canopy, use_soil;
     global_config->getValue("CANOPY", "Snowpack", use_canopy);
     global_config->getValue("SNP_SOIL", "Snowpack", use_soil);
     const bool alpine3d = false; // WRF integration, not Alpine3D
@@ -295,6 +417,7 @@ SnowStation* get_or_create_snowstation(
     // Store the new SnowStation
     SnowStation* station_ptr = new_station.get();
     grid_snowstations[grid_key] = std::move(new_station);
+    
     return station_ptr;
 }
 
@@ -364,12 +487,12 @@ void save_all_snowpack_states() {
 // C interface for Fortran binding
 extern "C" {
 
-// Initialize configuration with specific path (called from Fortran)
-void initialize_snowpack_config_c(const char* ini_file_path) {
-    config_init_calls++;
-    std::string path_str(ini_file_path);
-    initialize_snowpack_config_with_path(path_str);
-}
+// // Initialize configuration with specific path (called from Fortran)
+// void initialize_snowpack_config_c(const char* ini_file_path) {
+//     config_init_calls++;
+//     std::string path_str(ini_file_path);
+//     initialize_snowpack_config_with_path(path_str);
+// }
 
 // Initialize WRF simulation time (CRYOWRF pattern - called once from Fortran)
 void initialize_wrf_simulation_time_c(int start_year, int start_month, int start_day,
@@ -1008,83 +1131,82 @@ void snowpack_physics_layers_internal(double temp_air, double humidity, double w
   }
 }
 
-// Extract detailed layer data from SNOWPACK for CRYOWRF compatibility
-void extract_snowpack_layers_c(int i_grid, int j_grid,
-                               float layer_temps[100], float layer_thick[100],
-                               float layer_voli[100], float layer_volw[100], float layer_volv[100],
-                               float layer_rg[100], float layer_rb[100],
-                               float layer_dd[100], float layer_sp[100],
-                               int* n_layers) {
-  try {
-    // Initialize all arrays to zero
-    for (int i = 0; i < 100; i++) {
-      layer_temps[i] = 0.0f;
-      layer_thick[i] = 0.0f;
-      layer_voli[i] = 0.0f;
-      layer_volw[i] = 0.0f;
-      layer_volv[i] = 0.0f;
-      layer_rg[i] = 0.0f;
-      layer_rb[i] = 0.0f;
-      layer_dd[i] = 0.0f;
-      layer_sp[i] = 1.0f;  // Default sphericity
-    }
+// // Extract detailed layer data from SNOWPACK for CRYOWRF compatibility
+// void extract_snowpack_layers_c(int i_grid, int j_grid,
+//                                float layer_temps[100], float layer_thick[100],
+//                                float layer_voli[100], float layer_volw[100], float layer_volv[100],
+//                                float layer_rg[100], float layer_rb[100],
+//                                float layer_dd[100], float layer_sp[100],
+//                                int* n_layers) {
+//   try {
+//     // Initialize all arrays to zero
+//     for (int i = 0; i < 100; i++) {
+//       layer_temps[i] = 0.0f;
+//       layer_thick[i] = 0.0f;
+//       layer_voli[i] = 0.0f;
+//       layer_volw[i] = 0.0f;
+//       layer_volv[i] = 0.0f;
+//       layer_rg[i] = 0.0f;
+//       layer_rb[i] = 0.0f;
+//       layer_dd[i] = 0.0f;
+//       layer_sp[i] = 1.0f;  // Default sphericity
+//     }
 
-    // Use persistent SnowStation objects from our grid-based storage
-    std::string grid_key = generate_grid_key(i_grid, j_grid);
-    auto station_it = grid_snowstations.find(grid_key);
+//     // Use persistent SnowStation objects from our grid-based storage
+//     std::string grid_key = generate_grid_key(i_grid, j_grid);
+//     auto station_it = grid_snowstations.find(grid_key);
 
-    if (station_it == grid_snowstations.end()) {
-        // No SnowStation exists for this grid point - set to zero layers
-        *n_layers = 0;
-        printf("SNOWPACK-LAYERS: Grid (%d,%d) has no persistent SnowStation - zero layers\n",
-               i_grid, j_grid);
-        return;
-    }
+//     if (station_it == grid_snowstations.end()) {
+//         // No SnowStation exists for this grid point - set to zero layers
+//         *n_layers = 0;
+//         printf("SNOWPACK-LAYERS: Grid (%d,%d) has no persistent SnowStation - zero layers\n",
+//                i_grid, j_grid);
+//         return;
+//     }
 
-    // Access persistent SnowStation for this grid point
-    const SnowStation* xdata = station_it->second.get();
+//     // Access persistent SnowStation for this grid point
+//     const SnowStation* xdata = station_it->second.get();
 
-    // CRYOWRF-style layer extraction algorithm (from Coupler.cpp:1153-1185)
-    // Extract from evolved snowpack with real layer data
+//     // CRYOWRF-style layer extraction algorithm (from Coupler.cpp:1153-1185)
+//     // Extract from evolved snowpack with real layer data
 
-    const std::vector<ElementData>& elem_data = xdata->Edata;
-    const int get_size = (int)xdata->getNumberOfElements();
-    const int loc_snpack_lay_to_sav = 100; // Maximum layers to save (CRYOWRF default)
-    const int lim_size = std::max(0, get_size - loc_snpack_lay_to_sav);
+//     const std::vector<ElementData>& elem_data = xdata->Edata;
+//     const int get_size = (int)xdata->getNumberOfElements();
+//     const int loc_snpack_lay_to_sav = 100; // Maximum layers to save (CRYOWRF default)
+//     const int lim_size = std::max(0, get_size - loc_snpack_lay_to_sav);
 
-    // CRYOWRF algorithm: Extract from surface down, top-down indexing
-    int tmtm = 0;
-    for (int e = get_size - 1; e >= lim_size && tmtm < 100; e++, tmtm++) {
-      // Extract layer data using exact CRYOWRF algorithm
-      // With persistent SnowStation objects, evolved snowpack layers are available for extraction
-      if (e + 1 < (int)xdata->Ndata.size()) { // Safety check for node access
-        layer_temps[tmtm] = (float)xdata->Ndata[e + 1].T;        // Node temperature [K]
-      }
-      layer_thick[tmtm] = (float)elem_data[e].L;                // Layer thickness [m]
-      layer_voli[tmtm] = (float)elem_data[e].theta[ICE] * 100.0f; // Ice volume fraction [%]
-      layer_volw[tmtm] = (float)elem_data[e].theta[WATER] * 100.0f; // Water volume fraction [%]
-      layer_volv[tmtm] = (float)elem_data[e].theta[AIR] * 100.0f; // Air volume fraction [%]
-      layer_rg[tmtm] = (float)elem_data[e].rg;                  // Grain radius [mm]
-      layer_rb[tmtm] = (float)elem_data[e].rb;                  // Bond radius [mm]
-      layer_dd[tmtm] = (float)elem_data[e].dd;                  // Dendricity [-]
-      layer_sp[tmtm] = (float)elem_data[e].sp;                  // Sphericity [-]
-    }
+//     // CRYOWRF algorithm: Extract from surface down, top-down indexing
+//     int tmtm = 0;
+//     for (int e = get_size - 1; e >= lim_size && tmtm < 100; e++, tmtm++) {
+//       // Extract layer data using exact CRYOWRF algorithm
+//       // With persistent SnowStation objects, evolved snowpack layers are available for extraction
+//       if (e + 1 < (int)xdata->Ndata.size()) { // Safety check for node access
+//         layer_temps[tmtm] = (float)xdata->Ndata[e + 1].T;        // Node temperature [K]
+//       }
+//       layer_thick[tmtm] = (float)elem_data[e].L;                // Layer thickness [m]
+//       layer_voli[tmtm] = (float)elem_data[e].theta[ICE] * 100.0f; // Ice volume fraction [%]
+//       layer_volw[tmtm] = (float)elem_data[e].theta[WATER] * 100.0f; // Water volume fraction [%]
+//       layer_volv[tmtm] = (float)elem_data[e].theta[AIR] * 100.0f; // Air volume fraction [%]
+//       layer_rg[tmtm] = (float)elem_data[e].rg;                  // Grain radius [mm]
+//       layer_rb[tmtm] = (float)elem_data[e].rb;                  // Bond radius [mm]
+//       layer_dd[tmtm] = (float)elem_data[e].dd;                  // Dendricity [-]
+//       layer_sp[tmtm] = (float)elem_data[e].sp;                  // Sphericity [-]
+//     }
 
-    *n_layers = get_size; // Total number of layers (following CRYOWRF: sn_nlayer = get_size)
+//     *n_layers = get_size; // Total number of layers (following CRYOWRF: sn_nlayer = get_size)
 
-  } catch (const std::exception& e) {
-    printf("SNOWPACK-ERROR: Layer extraction failed for grid (%d,%d): %s\n", i_grid, j_grid, e.what());
-    *n_layers = 0;
-  }
+//   } catch (const std::exception& e) {
+//     printf("SNOWPACK-ERROR: Layer extraction failed for grid (%d,%d): %s\n", i_grid, j_grid, e.what());
+//     *n_layers = 0;
+//   }
+// }
+
+// // Save all snowpack states (called from Fortran for periodic saves)
+// void save_all_snowpack_states_c() {
+//     save_all_snowpack_states();
+// }
+
 }
-
-// Save all snowpack states (called from Fortran for periodic saves)
-void save_all_snowpack_states_c() {
-    save_all_snowpack_states();
-}
-
-} // extern "C"
-
 // Extern C wrapper for Fortran BIND(C) interface
 extern "C" void snowpack_physics_layers(
     double temp_air, double humidity, double wind_speed, double wind_dir, double shortwave_in, double longwave_in,
@@ -1098,71 +1220,78 @@ extern "C" void snowpack_physics_layers(
     double* energy_sensible, double* energy_latent, double* energy_ground_flux, double* energy_rain,
     double* energy_total
 ) {
-    physics_layers_calls++;
+    SnowpackBridge& bridge = SnowpackBridge::instance();
 
-    if (!snow_swe || !snow_depth || !surface_temp || !energy_lw_out) {
-        printf("SNOWPACK-FATAL [CALL #%d]: Essential NULL pointer detected - snow_swe=%p, snow_depth=%p, surface_temp=%p, energy_lw_out=%p\n",
-               physics_layers_calls, (void*)snow_swe, (void*)snow_depth, (void*)surface_temp, (void*)energy_lw_out);
-        std::abort();
+    // Ensure configuration is loaded (loads io.ini if needed)
+    if (!bridge.is_config_initialized()) {
+        bridge.initialize_config(SnowpackConfigManager::getDefaultConfigPath());
     }
 
-    // Initialize all output arrays to safe values before processing (defensive initialization)
-    try {
+    // Init internal data structures
+    MeteoInput input;
+    SnowpackOutput output;
+    SnowpackLayerData layer_data;
+    BudgetData budget_data;
+    
+    // 
+    input.temp_air = temp_air;
+    input.humidity = humidity;
+    input.wind_speed = wind_speed;
+    input.wind_dir = wind_dir;
+    input.shortwave_in = shortwave_in;
+    input.longwave_in = longwave_in;
+    input.precipitation = precipitation;
+    input.pressure = pressure;
+    input.height = height;
+    input.dt = dt;
+    input.i_grid = i_grid;
+    input.j_grid = j_grid;
+    input.wrf_lat = wrf_lat;
+    input.wrf_lon = wrf_lon;
 
-        // Essential outputs (defensive initialization - will be overridden by SNOWPACK)
-        *snow_swe = 0.0;        // Initial default - will be overridden by SNOWPACK extraction
-        *snow_depth = 0.0;      // Initial default - will be overridden by SNOWPACK extraction
-        *surface_temp = 273.15; // Initial default - will be overridden by SNOWPACK extraction
-        *energy_lw_out = 0.0;   // Initial default - will be overridden by SNOWPACK extraction
-        // Optional outputs (defensive initialization - will be overridden by SNOWPACK)
-        if (heat_flux_sensible) *heat_flux_sensible = 0.0;      // Initial default
-        if (heat_flux_latent) *heat_flux_latent = 0.0;          // Initial default
-        if (albedo) *albedo = 0.3;                             // Initial default (reasonable albedo)
-        if (snow_coverage) *snow_coverage = 0.0;                // Initial default
-        if (friction_velocity) *friction_velocity = 0.0;        // Initial default
-        if (stability_param) *stability_param = 0.0;            // Initial default
-        if (n_layers) *n_layers = 0;                           // Initial default
-        if (mass_precip) *mass_precip = 0.0;
-        if (mass_sublim) *mass_sublim = 0.0;
-        if (mass_melt) *mass_melt = 0.0;
-        if (mass_swe) *mass_swe = 0.0;
-        if (mass_refreeze) *mass_refreeze = 0.0;
-        if (energy_lw_in) *energy_lw_in = longwave_in;
-        if (energy_sw_in) *energy_sw_in = shortwave_in;
-        if (energy_sw_out) *energy_sw_out = 0.0;
-        if (energy_sensible) *energy_sensible = 0.0;
-        if (energy_latent) *energy_latent = 0.0;
-        if (energy_ground_flux) *energy_ground_flux = 0.0;
-        if (energy_rain) *energy_rain = 0.0;
-        if (energy_total) *energy_total = 0.0;
+    bridge.execute_snowpack(input, output, &layer_data, &budget_data);
 
-        // Initialize layer arrays to safe values (only if pointers are not NULL)
-        if (layer_temp && layer_thick && layer_vol_ice && layer_vol_water && layer_vol_air &&
-            layer_grain_radius && layer_bond_radius && layer_dendricity && layer_sphericity) {
-            for (int i = 0; i < 100; i++) {
-                layer_temp[i] = temp_air;
-                layer_thick[i] = 0.0;
-                layer_vol_ice[i] = 0.0;
-                layer_vol_water[i] = 0.0;
-                layer_vol_air[i] = 0.0;
-                layer_grain_radius[i] = 0.0;
-                layer_bond_radius[i] = 0.0;
-                layer_dendricity[i] = 0.0;
-                layer_sphericity[i] = 1.0;
-            }
-        }
-    } catch (const std::exception& e) {
-        printf("SNOWPACK-FATAL [CALL #%d]: Exception initializing output arrays: %s\n", physics_layers_calls, e.what());
-        std::abort();
+    // Basic snowpack outputs
+    *snow_swe = output.snow_swe;
+    *snow_depth = output.snow_depth;
+    *surface_temp = output.surface_temp;
+    *heat_flux_sensible = output.heat_flux_sensible;
+    *heat_flux_latent = output.heat_flux_latent;
+    *albedo = output.albedo;
+    *snow_coverage = output.snow_coverage;
+    *friction_velocity = output.friction_velocity;
+    *stability_param = output.stability_param;
+
+    // Layer data (up to 100 layers)
+    *n_layers = layer_data.n_layers;
+    for (int i = 0; i < layer_data.n_layers && i < 100; i++) {
+        layer_temp[i] = layer_data.layer_temp[i];
+        layer_thick[i] = layer_data.layer_thick[i];
+        layer_vol_ice[i] = layer_data.layer_vol_ice[i];
+        layer_vol_water[i] = layer_data.layer_vol_water[i];
+        layer_vol_air[i] = layer_data.layer_vol_air[i];
+        layer_grain_radius[i] = layer_data.layer_grain_radius[i];
+        layer_bond_radius[i] = layer_data.layer_bond_radius[i];
+        layer_dendricity[i] = layer_data.layer_dendricity[i];
+        layer_sphericity[i] = layer_data.layer_sphericity[i];
     }
 
-    snowpack_physics_layers_internal(  // Call internal C++ function with proper coordinates from WRF
-        temp_air, humidity, wind_speed, wind_dir, shortwave_in, longwave_in, precipitation, pressure, height, dt,
-        i_grid, j_grid, wrf_lat, wrf_lon, snow_swe, snow_depth, surface_temp, heat_flux_sensible, heat_flux_latent,
-        albedo, snow_coverage, friction_velocity, stability_param, n_layers, layer_temp, layer_thick, layer_vol_ice,
-        layer_vol_water, layer_vol_air, layer_grain_radius, layer_bond_radius, layer_dendricity, layer_sphericity,
-        mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze, energy_lw_in, energy_lw_out, energy_sw_in,
-        energy_sw_out, energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
-    );
+    // Mass budget data
+    *mass_precip = budget_data.mass_precip;
+    *mass_sublim = budget_data.mass_sublim;
+    *mass_melt = budget_data.mass_melt;
+    *mass_swe = budget_data.mass_swe;
+    *mass_refreeze = budget_data.mass_refreeze;
 
+    // Energy budget data
+    *energy_lw_in = budget_data.energy_lw_in;
+    *energy_lw_out = budget_data.energy_lw_out;
+    *energy_sw_in = budget_data.energy_sw_in;
+    *energy_sw_out = budget_data.energy_sw_out;
+    *energy_sensible = budget_data.energy_sensible;
+    *energy_latent = budget_data.energy_latent;
+    *energy_ground_flux = budget_data.energy_ground_flux;
+    *energy_rain = budget_data.energy_rain;
+    *energy_total = budget_data.energy_total;
+    
 }
