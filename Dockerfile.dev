@@ -17,7 +17,16 @@ WORKDIR ${BASE_DIR}
 COPY --chown=wrfuser:wrfuser phys/ ${BASE_DIR}/WRF/phys/
 
 WORKDIR ${BASE_DIR}/WRF
-RUN ./compile em_real -j 20 
+RUN ./compile em_real -j 20 && \
+    if [ -f "main/wrf.exe" ]; then \
+        echo "WRF compilation successful: wrf.exe found at main/wrf.exe"; \
+        ls -la main/wrf.exe; \
+    else \
+        echo "WRF compilation failed: wrf.exe not found"; \
+        echo "Looking for executable in alternative locations..."; \
+        find . -name "wrf.exe" -type f 2>/dev/null || echo "No wrf.exe found anywhere"; \
+        exit 1; \
+    fi 
 
 # Set working directory for development
 WORKDIR /home/wrfuser

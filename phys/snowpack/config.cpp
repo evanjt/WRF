@@ -19,7 +19,13 @@ mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file
         std::stringstream ss_meteo_length;
         ss_meteo_length << meteo_step_length;
         config.addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
-        
+
+        // Verify the key was added correctly
+        std::string verify_value;
+        config.getValue("METEO_STEP_LENGTH", "Snowpack", verify_value);
+        printf("SNOWPACK-CONFIG: METEO_STEP_LENGTH set to %s seconds (from CALCULATION_STEP_LENGTH=%.1f minutes)\n",
+               verify_value.c_str(), calculation_step_length);
+
         return config;
     } catch (const std::exception& e) {
         printf("SNOWPACK-ERROR [C++/SnowpackConfigManager]: Failed to load %s: %s\n", ini_file_path.c_str(), e.what());
