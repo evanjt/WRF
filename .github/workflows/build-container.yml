@@ -50,6 +50,10 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
 
+    - name: Get current date for tagging
+      id: date
+      run: echo "date=$(date +%Y%m%d)" >> $GITHUB_OUTPUT
+
     - name: Build and push base image
       uses: docker/build-push-action@v5
       with:
@@ -58,7 +62,7 @@ jobs:
         push: true
         tags: |
           ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:latest
-          ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:$(date +%Y%m%d)
+          ${{ env.REGISTRY }}/${{ env.BASE_IMAGE_NAME }}:${{ steps.date.outputs.date }}
         labels: |
           org.opencontainers.image.source=https://github.com/${{ github.repository }}
           org.opencontainers.image.created=${{ github.sha }}
