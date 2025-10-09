@@ -6,17 +6,19 @@ on:
       - '**'
     tags:
       - 'v*'
-    paths:
-      - 'Dockerfile'
-      - '../libraries/**'
-      - '../snpack_for_wrf/**'
   pull_request:
     branches:
       - '**'
-    paths:
-      - 'phys/**'
-      - 'Dockerfile.dev'
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Type of build to run'
+        required: true
+        default: 'base'
+        type: choice
+        options:
+        - base
+        - pr
   schedule:
     # Rebuild library cache daily (02:00 UTC) to ensure fresh dependencies
     - cron: '0 2 * * *'
@@ -28,7 +30,7 @@ env:
 
 jobs:
   build-base:
-    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'base')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -68,7 +70,7 @@ jobs:
         platforms: linux/amd64
 
   build-pr:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'pr')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
