@@ -33,7 +33,7 @@ struct SnowpackOutput {
 
 struct SnowpackLayerData {
     int n_layers;
-    
+
     double layer_temp[100];
     double layer_thick[100];
     double layer_vol_ice[100];

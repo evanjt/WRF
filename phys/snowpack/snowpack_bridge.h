@@ -5,6 +5,7 @@
 #include <string>
 
 #include "snowpack_bridge_structs.h"
+#include "snowpack_utils.h"
 #include "config.h"
 #include "meteoio/meteoio/MeteoIO.h"
 #include "snowpack/snowpack/DataClasses.h"
@@ -76,8 +77,8 @@ public:
     void initialize_time(int start_year, int start_month, int start_day,
                         int start_hour, int start_minute);
     bool is_time_initialized() const { return time_initialized_; }
-    const mio::Date& get_current_time() const { 
-        return current_simulation_date_; 
+    const mio::Date& get_current_time() const {
+        return current_simulation_date_;
     }
 
     // Object management
@@ -88,7 +89,7 @@ public:
     Snowpack* get_or_create_snowpack_instance(
         int i_grid, int j_grid, double wrf_lat, double wrf_lon, double wrf_alt
     );
-    SnowStation* get_existing_snowstation(int i_grid, int j_grid); 
+    SnowStation* get_existing_snowstation(int i_grid, int j_grid);
 
     // State persistence
     void save_snowstation_state(int i_grid, int j_grid);
@@ -148,4 +149,3 @@ void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowSta
 void validate_output_values(const SnowpackOutput& output, int i_grid, int j_grid);
 
 void validate_layer_data(const SnowpackLayerData& layer_data, int i_grid, int j_grid);
-

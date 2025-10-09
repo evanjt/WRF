@@ -4,10 +4,15 @@
 #include <string>
 
 #include "meteoio/meteoio/MeteoIO.h"
-#include "snowpack/snowpack/DataClasses.h"
-#include "snowpack/snowpack/SnowpackConfig.h"
-#include "snowpack/snowpack/snowpackCore/Snowpack.h"
-#include "snowpack/snowpack/plugins/SnowpackIO.h"
+
+// Forward declarations to minimize dependencies
+namespace mio {
+  class Config;
+}
+
+struct SnowpackConfig;
+class SnowpackIO;
+class Snowpack;
 
 class SnowpackConfigManager {
 public:

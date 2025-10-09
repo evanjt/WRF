@@ -3,16 +3,7 @@
  * Extracted from snowpack_bridge.cpp to improve code organization
  */
 
-#include <cmath>
-#include <cstdio>
-#include <algorithm>
 #include "snowpack_bridge.h"
-#include "snowpack_bridge_structs.h"
-#include "meteoio/meteoio/MeteoIO.h"
-#include "snowpack/snowpack/DataClasses.h"
-#include "snowpack/snowpack/SnowpackConfig.h"
-
-namespace {
 
 // Initialize time step management following CRYOWRF pattern
 void initialize_time_step_internal(const MeteoInput& input,
@@ -30,9 +21,6 @@ void initialize_time_step_internal(const MeteoInput& input,
         // So we run SNOWPACK every (wrf_dt/snowpack_dt) WRF calls
         compute_counter = (int)(wrf_dt / snowpack_dt);
         first_call = false;
-
-        printf("SNOWPACK-INFO: Time management initialized - WRF dt=%.1fs, SNOWPACK dt=%.1fs, compute_counter=%d\n",
-               wrf_dt, snowpack_dt, compute_counter);
     }
 
     call_counter++;
@@ -40,14 +28,9 @@ void initialize_time_step_internal(const MeteoInput& input,
     // Only advance time when counter matches (CRYOWRF pattern)
     if (compute_counter > 0 && (call_counter % compute_counter) == 0) {
         current_time += (calculation_step_length / 1440.0);  // Convert minutes to days
-        printf("SNOWPACK-INFO: Time advanced to %s (call %d)\n",
-               current_time.toString().c_str(), call_counter);
     }
 }
 
-} // anonymous namespace
-
-namespace SnowpackUtils {
 
 void prepare_meteo_data(const MeteoInput& input,
                         CurrentMeteo& Mdata,
@@ -62,12 +45,12 @@ void prepare_meteo_data(const MeteoInput& input,
     // Fill meteorological data structure using correct SNOWPACK API
     Mdata.date = current_time;
     Mdata.ta = safe_temp;                                       // Air temperature [K]
-    Mdata.rh = std::max(0.01, std::min(1.0, input.humidity));  // Relative humidity [0-1]
-    Mdata.vw = std::max(0.1, input.wind_speed);               // Wind speed [m/s]
-    Mdata.dw = input.wind_dir;                                 // Wind direction [degrees]
-    Mdata.iswr = std::max(0.0, input.shortwave_in);           // Incoming shortwave [W/m²]
-    Mdata.lw_net = std::max(0.0, input.longwave_in);         // Net longwave radiation [W/m²]
-    Mdata.psum = std::max(0.0, input.precipitation);          // Precipitation [mm]
+    Mdata.rh = std::max(0.01, std::min(1.0, input.humidity));   // Relative humidity [0-1]
+    Mdata.vw = std::max(0.1, input.wind_speed);                 // Wind speed [m/s]
+    Mdata.dw = input.wind_dir;                                  // Wind direction [degrees]
+    Mdata.iswr = std::max(0.0, input.shortwave_in);             // Incoming shortwave [W/m²]
+    Mdata.lw_net = std::max(0.0, input.longwave_in);            // Net longwave radiation [W/m²]
+    Mdata.psum = std::max(0.0, input.precipitation);            // Precipitation [mm]
 
     // Calculate atmospheric emissivity using approximation (Stull 1988)
     // CRYOWRF SOURCE: Derived from atmospheric emissivity patterns in CRYOWRF coupler
@@ -137,18 +120,19 @@ void extract_surface_outputs(const SnowStation& station,
     try {
         size_t ndata_size = station.Ndata.size();
         output.surface_temp = (ndata_size > 0) ? station.Ndata.back().T : temp_air_fallback;  // Surface temperature [K]
-        output.snow_swe = station.swe;                                  // Snow water equivalent [mm]
-        output.snow_depth = station.cH - station.Ground;                // Snow height [m] (CRYOWRF line 1129)
-        output.heat_flux_sensible = -1.0 * fluxes.qs;                   // Negative sign for WRF convention (CRYOWRF line 1123)
-        output.heat_flux_latent = -1.0 * bc.ql;                        // Use boundary condition data (CRYOWRF line 1124)
+        output.snow_swe = station.swe;                      // Snow water equivalent [mm]
+        output.snow_depth = station.cH - station.Ground;    // Snow height [m] (CRYOWRF line 1129)
+        output.heat_flux_sensible = -1.0 * fluxes.qs;       // Negative sign for WRF convention (CRYOWRF line 1123)
+        output.heat_flux_latent = -1.0 * bc.ql;             // Use boundary condition data (CRYOWRF line 1124)
         output.albedo = station.Albedo;
-        output.snow_coverage = 1.0;  // Hardcoded to 1.0 following CRYOWRF pattern (line 1127)
-        output.friction_velocity = 0.0;  // Will be set from meteo data
-        output.stability_param = 0.0;    // Will be calculated if needed
+        output.snow_coverage = 1.0;                         // Hardcoded to 1.0 following CRYOWRF pattern (line 1127)
+        output.friction_velocity = 0.0;                     // Will be set from meteo data
+        output.stability_param = 0.0;                       // Will be calculated if needed
 
         // Consistency check
         if (output.snow_depth > 0.001 && output.snow_swe <= 0.0) {
-            output.snow_swe = output.snow_depth * SnowpackConstants::SNOW_DENSITY_FALLBACK;  // Use fallback density
+            // Use fallback density
+            output.snow_swe = output.snow_depth * SnowpackConstants::SNOW_DENSITY_FALLBACK;
         }
 
     } catch (const std::exception& e) {
@@ -170,8 +154,8 @@ void extract_layer_data(const SnowStation& station, SnowpackLayerData& layer_dat
             layer_data.layer_temp[i] = elem.Te;
             layer_data.layer_thick[i] = elem.L;
             layer_data.layer_vol_ice[i] = elem.theta[0] * 100.0;    // ICE index = 0
-            layer_data.layer_vol_water[i] = elem.theta[1] * 100.0; // WATER index = 1
-            layer_data.layer_vol_air[i] = elem.theta[2] * 100.0;   // AIR index = 2
+            layer_data.layer_vol_water[i] = elem.theta[1] * 100.0;  // WATER index = 1
+            layer_data.layer_vol_air[i] = elem.theta[2] * 100.0;    // AIR index = 2
 
             layer_data.layer_grain_radius[i] = elem.rg;
             layer_data.layer_bond_radius[i] = elem.rb;
@@ -216,9 +200,9 @@ void extract_budget_data(const SurfaceFluxes& fluxes,
         budget_data.mass_refreeze = (ice_base_meltfreeze > 0.0) ? ice_base_meltfreeze : 0.0;  // Positive values = freezing
 
         // Energy budgets
-        budget_data.energy_lw_in = input.longwave_in;                           // Incoming longwave [W/m²]
+        budget_data.energy_lw_in = input.longwave_in;                          // Incoming longwave [W/m²]
         budget_data.energy_lw_out = fluxes.lw_out;                             // Outgoing longwave [W/m²] (CRYOWRF line 1087)
-        budget_data.energy_sw_in = input.shortwave_in;                          // Incoming shortwave [W/m²]
+        budget_data.energy_sw_in = input.shortwave_in;                         // Incoming shortwave [W/m²]
         budget_data.energy_sw_out = input.shortwave_in * (1.0) - fluxes.sw_in; // Reflected shortwave [W/m²]
         budget_data.energy_sensible = fluxes.qs;                               // Sensible heat flux [W/m²]
         budget_data.energy_latent = bc.ql;                                     // Latent heat flux [W/m²]
@@ -255,10 +239,6 @@ public:
 // Global time manager instance
 static TimeManager g_time_manager;
 
-void advance_simulation_time(const MeteoInput& input,
-                           mio::Date& current_time,
-                           double calculation_step_length) {
-    g_time_manager.advance_time(input, current_time, calculation_step_length);
+void advance_simulation_time(const MeteoInput& input, mio::Date& current_time, double calculation_step_length) {
+        g_time_manager.advance_time(input, current_time, calculation_step_length);
 }
-
-} // namespace SnowpackUtils
