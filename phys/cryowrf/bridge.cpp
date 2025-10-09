@@ -1,7 +1,9 @@
 /*
- * CRYOWRF: SNOWPACK + WRF bridge
+ * CRYOWRF: SNOWPACK + MeteoIO + WRF bridge
  *
  * This file provides the C interface between WRF (Fortran) and SNOWPACK (C++)
+ * CRYOWRF serves as the coupling layer that integrates SNOWPACK snow physics
+ * and MeteoIO meteorological data processing with the WRF atmospheric model
  */
 
 #include <cmath>
@@ -17,7 +19,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 
-#include "snowpack_bridge.h"
+#include "bridge.h"
 
 // Forward declarations for namespace functions
 namespace SnowpackObjects {

@@ -3670,5 +3670,3 @@ rconfig   real        windfarm_deg           namelist,physics      max_domains  
 # outputs for RCON model.
 state    real  CLOUDNC              ij       misc        1         -      rh   "CLOUDNC"                "ACCUMULATED TOTAL GRID SCALE CLOUD PRECIPITATION"     "mm"
 
-# Include SNOWPACK Registry
-include registry.snowpack

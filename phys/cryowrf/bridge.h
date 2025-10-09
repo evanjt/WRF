@@ -4,8 +4,8 @@
 #include <cstring>
 #include <string>
 
-#include "snowpack_bridge_structs.h"
-#include "snowpack_utils.h"
+#include "structs.h"
+#include "utils.h"
 #include "config.h"
 #include "meteoio/meteoio/MeteoIO.h"
 #include "snowpack/snowpack/DataClasses.h"

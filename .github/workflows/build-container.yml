@@ -36,8 +36,8 @@ jobs:
       run: |
         git submodule update --init --recursive phys/MYNN-EDMF
         git submodule update --init --recursive phys/noahmp
-        git submodule update --init --recursive phys/snowpack/meteoio
-        git submodule update --init --recursive phys/snowpack/snowpack
+        git submodule update --init --recursive phys/cryowrf/meteoio
+        git submodule update --init --recursive phys/cryowrf/snowpack
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3

@@ -7,7 +7,7 @@ ENV BASE_DIR=/home/wrfuser/wrf-build \
     NETCDF=${BASE_DIR}/libs/netcdf \
     JASPERLIB=${BASE_DIR}/libs/grib2/lib \
     JASPERINC=${BASE_DIR}/libs/grib2/include \
-    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/snowpack/snowpack/lib:${BASE_DIR}/WRF/phys/snowpack/meteoio/lib" \
+    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/cryowrf/snowpack/lib:${BASE_DIR}/WRF/phys/cryowrf/meteoio/lib" \
     PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
 
 USER wrfuser

@@ -164,13 +164,13 @@ MODULES = \
 	module_sf_pxlsm.o \
 	module_sf_pxlsm_data.o \
 	module_sf_ruclsm.o \
-	module_snowpack_types.o \
-	module_sf_snowpackdrv.o \
-	module_sf_snowpack.o \
-	snowpack/snowpack_bridge.o \
-	snowpack/snowpack_objects.o \
-	snowpack/config.o \
-	snowpack/snowpack_utils.o \
+	module_cryowrf_types.o \
+	module_sf_cryowrfdrv.o \
+	module_sf_cryowrf.o \
+	cryowrf/bridge.o \
+	cryowrf/objects.o \
+	cryowrf/config.o \
+	cryowrf/utils.o \
 	module_sf_sfcdiags.o \
 	module_sf_sfcdiags_ruclsm.o \
 	module_sf_sstskin.o \
@@ -293,18 +293,18 @@ submodules :
 	@echo Initializing SNOWPACK submodules
 	@( cd .. ; git submodule update --init --recursive )
 	@echo Checking SNOWPACK libraries
-	@if [ ! -f snowpack/meteoio/build/lib/libmeteoio.so ] || [ ! -f snowpack/snowpack/build/lib/libsnowpack.so ]; then \
+	@if [ ! -f cryowrf/meteoio/build/lib/libmeteoio.so ] || [ ! -f cryowrf/snowpack/build/lib/libsnowpack.so ]; then \
 		echo "Building missing SNOWPACK libraries"; \
-		if [ ! -d snowpack/meteoio/build ]; then \
+		if [ ! -d cryowrf/meteoio/build ]; then \
 			echo "Building MeteoIO library"; \
-			( cd snowpack/meteoio && mkdir -p build lib && cd build && \
+			( cd cryowrf/meteoio && mkdir -p build lib && cd build && \
 			  cmake .. -DCMAKE_BUILD_TYPE=Release && make -j 32 ); \
 		else \
 			echo "MeteoIO library already built"; \
 		fi; \
-		if [ ! -d snowpack/snowpack/build ]; then \
+		if [ ! -d cryowrf/snowpack/build ]; then \
 			echo "Building SNOWPACK library"; \
-			( cd snowpack/snowpack && mkdir -p build lib && cd build && \
+			( cd cryowrf/snowpack && mkdir -p build lib && cd build && \
 			  cmake .. -DCMAKE_BUILD_TYPE=Release -DMETEOIO_ROOT=../../meteoio/build && \
 			  make -j 32 ); \
 		else \
@@ -314,12 +314,12 @@ submodules :
 		echo "SNOWPACK libraries already built - skipping"; \
 	fi
 
-# C++ object compilation for SNOWPACK interface
-snowpack/snowpack_bridge.o: snowpack/snowpack_bridge.cpp snowpack/snowpack_bridge.h
-	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+# C++ object compilation for CRYOWRF interface
+cryowrf/bridge.o: cryowrf/bridge.cpp cryowrf/bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
-# Fortran module dependencies for SNOWPACK interface
-module_sf_snowpackdrv.o: module_snowpack_types.o
+# Fortran module dependencies for CRYOWRF interface
+module_sf_cryowrfdrv.o: module_cryowrf_types.o
 clean:
 	@ echo 'use the clean script'
 
@@ -328,12 +328,12 @@ clean:
 
 include ../main/depend.common
 
-# Additional C++ object compilation for SNOWPACK interface
-snowpack/snowpack_objects.o: snowpack/snowpack_objects.cpp snowpack/snowpack_bridge.h
-	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+# Additional C++ object compilation for CRYOWRF interface
+cryowrf/objects.o: cryowrf/objects.cpp cryowrf/bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
-snowpack/config.o: snowpack/config.cpp snowpack/config.h
-	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+cryowrf/config.o: cryowrf/config.cpp cryowrf/config.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
-snowpack/snowpack_utils.o: snowpack/snowpack_utils.cpp snowpack/snowpack_bridge.h
-	$(CXX) -c $(CXXFLAGS) -fPIC -Isnowpack -Isnowpack/meteoio -Isnowpack/snowpack -o $@ $<
+cryowrf/utils.o: cryowrf/utils.cpp cryowrf/bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<

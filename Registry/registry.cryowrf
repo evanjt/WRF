@@ -1,5 +1,6 @@
-# Registry for SNOWPACK Land Surface Model
+# Registry for CRYOWRF Land Surface Model (SNOWPACK + MeteoIO + WRF integration)
 # Clean interface without blowing snow complexity
+# CRYOWRF provides the bridge between SNOWPACK snow physics, MeteoIO meteorological processing, and WRF atmospheric model
 # Based on essential meteorological and snow physics variables only
 
 # Dimension for snow layers (simplified from CRYOWRF - no blowing snow layers)

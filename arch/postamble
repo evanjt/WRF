@@ -61,13 +61,13 @@ INCLUDE_MODULES =    $(MODULE_SRCH_FLAG) \
 REGISTRY        =    Registry
 CC_TOOLS_CFLAGS = CONFIGURE_NMM_CORE
 
-# SNOWPACK configuration - set to 1 to enable, 0 to disable
+# CRYOWRF configuration - set to 1 to enable, 0 to disable
 SNOWPACK        = 1
 
 ifeq ($(SNOWPACK), 1)
-SNOWPACK_LIB    = -L../phys/snowpack/snowpack/lib -lsnowpack -L../phys/snowpack/meteoio/lib -lmeteoio -lm -ldl -Wl,-rpath,../phys/snowpack/snowpack/lib -Wl,-rpath,../phys/snowpack/meteoio/lib
+SNOWPACK_LIB    = -L../phys/cryowrf/snowpack/lib -lsnowpack -L../phys/cryowrf/meteoio/lib -lmeteoio -lm -ldl -Wl,-rpath,../phys/cryowrf/snowpack/lib -Wl,-rpath,../phys/cryowrf/meteoio/lib
 else
-SNOWPACK_LIB    = 
+SNOWPACK_LIB    =
 endif
 
 LIB             =    $(LIB_BUNDLED) $(LIB_EXTERNAL) $(LIB_LOCAL) $(LIB_WRF_HYDRO) CONFIGURE_CTSM_LIB $(SNOWPACK_LIB)

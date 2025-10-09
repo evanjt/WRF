@@ -20,7 +20,7 @@ ENV DIR=${BASE_DIR}/libs \
     INCLUDE_DIR=${BASE_DIR}/libs/include \
     BIN_DIR=${BASE_DIR}/libs/bin \
     RUN_DIR=${BASE_DIR}/run \
-    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/snowpack/snowpack/lib:${BASE_DIR}/WRF/phys/snowpack/meteoio/lib" \
+    LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/cryowrf/snowpack/lib:${BASE_DIR}/WRF/phys/cryowrf/meteoio/lib" \
     PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
 
 # Compiler environment

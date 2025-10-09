@@ -1,4 +1,4 @@
-#include "snowpack_bridge.h"
+#include "bridge.h"
 
 // C interface for Fortran binding
 extern "C" {

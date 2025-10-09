@@ -7,9 +7,9 @@
 [submodule "phys/MYNN-EDMF"]
 	path = phys/MYNN-EDMF
 	url = https://github.com/NCAR/MYNN-EDMF
-[submodule "phys/snowpack/meteoio"]
-	path = phys/snowpack/meteoio
+[submodule "phys/cryowrf/meteoio"]
+	path = phys/cryowrf/meteoio
 	url = https://git.wsl.ch/snow-models/meteoio.git
-[submodule "phys/snowpack/snowpack"]
-	path = phys/snowpack/snowpack
+[submodule "phys/cryowrf/snowpack"]
+	path = phys/cryowrf/snowpack
 	url = https://git.wsl.ch/snow-models/snowpack.git

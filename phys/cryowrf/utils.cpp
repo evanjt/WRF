@@ -1,9 +1,10 @@
 /*
- * Snowpack utilities - meteorological data preparation and time management
- * Extracted from snowpack_bridge.cpp to improve code organization
+ * CRYOWRF utilities for SNOWPACK integration - meteorological data preparation and time management
+ * CRYOWRF provides the bridge between WRF and SNOWPACK/MeteoIO
+ * Extracted from bridge.cpp to improve code organization
  */
 
-#include "snowpack_bridge.h"
+#include "bridge.h"
 
 // Initialize time step management following CRYOWRF pattern
 void initialize_time_step_internal(const MeteoInput& input,

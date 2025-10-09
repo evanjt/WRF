@@ -1,6 +1,7 @@
 /*
- * Snowpack object factory and management
- * Extracted from snowpack_bridge.cpp to improve code organization
+ * CRYOWRF object factory and management for SNOWPACK integration
+ * CRYOWRF provides the bridge between WRF and SNOWPACK/MeteoIO
+ * Extracted from bridge.cpp to improve code organization
  */
 
 #include <cstdio>
@@ -9,8 +10,8 @@
 #include <string>
 #include <fstream>
 #include <sys/stat.h>
-#include "snowpack_bridge.h"
-#include "snowpack_bridge_structs.h"
+#include "bridge.h"
+#include "structs.h"
 #include "meteoio/meteoio/MeteoIO.h"
 #include "snowpack/snowpack/DataClasses.h"
 #include "snowpack/snowpack/SnowpackConfig.h"
