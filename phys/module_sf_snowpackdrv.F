@@ -34,6 +34,7 @@ MODULE module_sf_snowpackdrv
             REAL(C_FLOAT), INTENT(OUT) :: layer_rg(100), layer_rb(100), layer_dd(100), layer_sp(100)
             INTEGER(C_INT), INTENT(OUT) :: n_layers
         END SUBROUTINE extract_snowpack_layers_c
+
     END INTERFACE
 
 CONTAINS

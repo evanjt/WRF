@@ -4,10 +4,79 @@
 !
 MODULE module_snowpack_types
 
+USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT, C_DOUBLE, C_PTR, C_NULL_PTR, C_LOC
 IMPLICIT NONE
 
 ! Maximum number of snow layers for arrays
 INTEGER, PARAMETER :: MAX_SNOW_LAYERS = 100
+
+!-------------------------------------------------------------------
+! C-interoperable structs matching C++ definitions in snowpack_bridge_structs.h
+! These are used to call the C++ bridge directly via BIND(C)
+!-------------------------------------------------------------------
+TYPE, BIND(C) :: MeteoInput_C
+    REAL(C_DOUBLE) :: temp_air
+    REAL(C_DOUBLE) :: humidity
+    REAL(C_DOUBLE) :: wind_speed
+    REAL(C_DOUBLE) :: wind_dir
+    REAL(C_DOUBLE) :: shortwave_in
+    REAL(C_DOUBLE) :: longwave_in
+    REAL(C_DOUBLE) :: precipitation
+    REAL(C_DOUBLE) :: pressure
+    REAL(C_DOUBLE) :: height
+    REAL(C_DOUBLE) :: dt
+    INTEGER(C_INT)  :: i_grid
+    INTEGER(C_INT)  :: j_grid
+    REAL(C_DOUBLE) :: wrf_lat
+    REAL(C_DOUBLE) :: wrf_lon
+END TYPE MeteoInput_C
+
+TYPE, BIND(C) :: SnowpackOutput_C
+    REAL(C_DOUBLE) :: snow_swe
+    REAL(C_DOUBLE) :: snow_depth
+    REAL(C_DOUBLE) :: surface_temp
+    REAL(C_DOUBLE) :: heat_flux_sensible
+    REAL(C_DOUBLE) :: heat_flux_latent
+    REAL(C_DOUBLE) :: albedo
+    REAL(C_DOUBLE) :: snow_coverage
+    REAL(C_DOUBLE) :: friction_velocity
+    REAL(C_DOUBLE) :: stability_param
+END TYPE SnowpackOutput_C
+
+TYPE, BIND(C) :: SnowpackLayerData_C
+    INTEGER(C_INT) :: n_layers
+    REAL(C_DOUBLE) :: layer_temp(100)
+    REAL(C_DOUBLE) :: layer_thick(100)
+    REAL(C_DOUBLE) :: layer_vol_ice(100)
+    REAL(C_DOUBLE) :: layer_vol_water(100)
+    REAL(C_DOUBLE) :: layer_vol_air(100)
+    REAL(C_DOUBLE) :: layer_grain_radius(100)
+    REAL(C_DOUBLE) :: layer_bond_radius(100)
+    REAL(C_DOUBLE) :: layer_dendricity(100)
+    REAL(C_DOUBLE) :: layer_sphericity(100)
+END TYPE SnowpackLayerData_C
+
+TYPE, BIND(C) :: BudgetData_C
+    REAL(C_DOUBLE) :: mass_precip
+    REAL(C_DOUBLE) :: mass_sublim
+    REAL(C_DOUBLE) :: mass_melt
+    REAL(C_DOUBLE) :: mass_swe
+    REAL(C_DOUBLE) :: mass_refreeze
+    REAL(C_DOUBLE) :: energy_lw_in
+    REAL(C_DOUBLE) :: energy_lw_out
+    REAL(C_DOUBLE) :: energy_sw_in
+    REAL(C_DOUBLE) :: energy_sw_out
+    REAL(C_DOUBLE) :: energy_sensible
+    REAL(C_DOUBLE) :: energy_latent
+    REAL(C_DOUBLE) :: energy_ground_flux
+    REAL(C_DOUBLE) :: energy_rain
+    REAL(C_DOUBLE) :: energy_total
+END TYPE BudgetData_C
+
+! External C++ bridge function declaration
+EXTERNAL :: snowpack_physics_c
+
+
 
 !-------------------------------------------------------------------
 ! Atmospheric forcing data structure
@@ -84,10 +153,12 @@ TYPE :: PhysicsBudgets
     REAL    :: mass_sublim     ! Mass from sublimation (negative = loss)
     REAL    :: mass_evap       ! Mass from evaporation (negative = loss)
     REAL    :: mass_melt       ! Mass from melting (negative = loss)
+    REAL    :: mass_swe        ! Snow water equivalent [kg/m²]
+    REAL    :: mass_refreeze   ! Mass from refreezing (positive = gain)
     REAL    :: mass_erosion    ! Mass from wind erosion (negative = loss)
     REAL    :: mass_deposition ! Mass from wind deposition
     
-    ! Energy budget components [J/m²] - accumulated over timestep  
+    ! Energy budget components [J/m²] - accumulated over timestep
     REAL    :: energy_sw_in    ! Shortwave radiation input
     REAL    :: energy_sw_out   ! Shortwave radiation output (reflected)
     REAL    :: energy_lw_in    ! Longwave radiation input
@@ -96,6 +167,8 @@ TYPE :: PhysicsBudgets
     REAL    :: energy_latent   ! Latent heat exchange
     REAL    :: energy_ground   ! Ground/soil heat exchange
     REAL    :: energy_precip   ! Energy from precipitation
+    REAL    :: energy_rain     ! Energy from rain
+    REAL    :: energy_total    ! Total energy balance
     
     ! Long-term accumulators [mm] - persistent across timesteps
     REAL    :: accum_snowfall  ! Accumulated snowfall since start
@@ -159,50 +232,50 @@ END TYPE SnowpackInterface
 CONTAINS
 
 !-------------------------------------------------------------------
-SUBROUTINE initialize_snowpack_interface(interface_data, itimestep, dt, dx)
+SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
 !-------------------------------------------------------------------
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     INTEGER, INTENT(IN) :: itimestep
     REAL, INTENT(IN) :: dt, dx
     
     ! Initialize configuration
-    interface_data%config%timestep_number = itimestep
-    interface_data%config%dt = dt
-    interface_data%config%dx = dx
+    snowpack_data%config%timestep_number = itimestep
+    snowpack_data%config%dt = dt
+    snowpack_data%config%dx = dx
     
     ! Set default physics options (can be configured via namelist later)
-    interface_data%config%enable_detailed_layers = .TRUE.
-    interface_data%config%enable_mass_budgets = .TRUE.
-    interface_data%config%enable_energy_budgets = .TRUE.
-    interface_data%config%enable_time_series = .FALSE.
+    snowpack_data%config%enable_detailed_layers = .TRUE.
+    snowpack_data%config%enable_mass_budgets = .TRUE.
+    snowpack_data%config%enable_energy_budgets = .TRUE.
+    snowpack_data%config%enable_time_series = .FALSE.
     
     ! Initialize layer data
-    interface_data%layers%n_layers = 0
-    interface_data%layers%layer_temp = 0.0
-    interface_data%layers%layer_thick = 0.0
+    snowpack_data%layers%n_layers = 0
+    snowpack_data%layers%layer_temp = 0.0
+    snowpack_data%layers%layer_thick = 0.0
 
     ! Initialize budgets (important - don't reset accumulators!)
-    interface_data%budgets%mass_precip = 0.0
-    interface_data%budgets%mass_sublim = 0.0
-    interface_data%budgets%energy_sw_in = 0.0
-    interface_data%budgets%energy_lw_in = 0.0
+    snowpack_data%budgets%mass_precip = 0.0
+    snowpack_data%budgets%mass_sublim = 0.0
+    snowpack_data%budgets%energy_sw_in = 0.0
+    snowpack_data%budgets%energy_lw_in = 0.0
     ! Note: accum_* variables should persist between calls
 
     ! Initialize atmospheric variables (CRYOWRF compatibility)
-    interface_data%surface%friction_velocity = 0.0
-    interface_data%surface%stability_param = 0.0
+    snowpack_data%surface%friction_velocity = 0.0
+    snowpack_data%surface%stability_param = 0.0
 
     ! Initialize soil variables
-    interface_data%soil%moisture_avail = 1.0      ! Maximum availability
-    interface_data%soil%moisture_total = 100.0    ! 100mm total water
-    interface_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture
-    interface_data%soil%moisture_liquid = 0.3     ! All moisture is liquid
-    interface_data%soil%temperature = 273.15      ! Freezing point
+    snowpack_data%soil%moisture_avail = 1.0      ! Maximum availability
+    snowpack_data%soil%moisture_total = 100.0    ! 100mm total water
+    snowpack_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture
+    snowpack_data%soil%moisture_liquid = 0.3     ! All moisture is liquid
+    snowpack_data%soil%temperature = 273.15      ! Freezing point
     
 END SUBROUTINE initialize_snowpack_interface
 
 !-------------------------------------------------------------------
-SUBROUTINE pack_wrf_to_interface(interface_data, &
+SUBROUTINE pack_wrf_to_interface(snowpack_data, &
     ! Atmospheric inputs
     t_phy, qv_curr, u_phy, v_phy, p8w, swdown, glw, rainbl, &
     ! Grid information  
@@ -214,7 +287,7 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     ! Grid indices
     i, j, k)
 !-------------------------------------------------------------------
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     
     ! WRF variables
     REAL, INTENT(IN) :: t_phy, qv_curr, u_phy, v_phy, p8w
@@ -242,17 +315,17 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     ! Calculate relative humidity: RH = Q / Q_sat, clamped to [0,1]
     rh_calc = MIN(1.0, MAX(q_ml / qs_sat, 0.0))
 
-    interface_data%atmos%temperature = t_phy
-    interface_data%atmos%humidity = rh_calc  ! Properly calculated RH, not raw QV!
-    interface_data%atmos%wind_u = u_phy
-    interface_data%atmos%wind_v = v_phy
-    interface_data%atmos%pressure = p8w
-    interface_data%atmos%shortwave_down = swdown
-    interface_data%atmos%longwave_down = glw
-    interface_data%atmos%precipitation = rainbl
-    interface_data%atmos%height = dz8w
-    interface_data%atmos%latitude = xlat
-    interface_data%atmos%longitude = xlong
+    snowpack_data%atmos%temperature = t_phy
+    snowpack_data%atmos%humidity = rh_calc  ! Properly calculated RH, not raw QV!
+    snowpack_data%atmos%wind_u = u_phy
+    snowpack_data%atmos%wind_v = v_phy
+    snowpack_data%atmos%pressure = p8w
+    snowpack_data%atmos%shortwave_down = swdown
+    snowpack_data%atmos%longwave_down = glw
+    snowpack_data%atmos%precipitation = rainbl
+    snowpack_data%atmos%height = dz8w
+    snowpack_data%atmos%latitude = xlat
+    snowpack_data%atmos%longitude = xlong
     
     ! Debug first few grid points
     IF (i <= 2 .AND. j <= 2) THEN
@@ -262,235 +335,259 @@ SUBROUTINE pack_wrf_to_interface(interface_data, &
     ENDIF
     
     ! Pack current surface state
-    interface_data%surface%snow_swe = snow
-    interface_data%surface%snow_depth = snowh
-    interface_data%surface%snow_coverage = snowc
-    interface_data%surface%surface_temp = tsk
-    interface_data%surface%albedo = albedo
-    interface_data%surface%heat_sensible = hfx
-    interface_data%surface%heat_latent = lh
-    interface_data%surface%heat_latent_kg = qfx
-    interface_data%surface%moisture_flux = qsfc
-    interface_data%surface%roughness_mom = z0
-    interface_data%surface%roughness_heat = znt
+    snowpack_data%surface%snow_swe = snow
+    snowpack_data%surface%snow_depth = snowh
+    snowpack_data%surface%snow_coverage = snowc
+    snowpack_data%surface%surface_temp = tsk
+    snowpack_data%surface%albedo = albedo
+    snowpack_data%surface%heat_sensible = hfx
+    snowpack_data%surface%heat_latent = lh
+    snowpack_data%surface%heat_latent_kg = qfx
+    snowpack_data%surface%moisture_flux = qsfc
+    snowpack_data%surface%roughness_mom = z0
+    snowpack_data%surface%roughness_heat = znt
     
     ! Pack model configuration
-    interface_data%config%dt = dt
-    interface_data%config%timestep_number = itimestep
-    interface_data%config%i_grid = i
-    interface_data%config%j_grid = j
+    snowpack_data%config%dt = dt
+    snowpack_data%config%timestep_number = itimestep
+    snowpack_data%config%i_grid = i
+    snowpack_data%config%j_grid = j
     
 END SUBROUTINE pack_wrf_to_interface
 
 !-------------------------------------------------------------------
-SUBROUTINE unpack_interface_to_wrf(interface_data, &
+SUBROUTINE unpack_interface_to_wrf(snowpack_data, &
     ! Surface state outputs
     tsk, hfx, qfx, lh, albedo, snowc, snow, snowh, qsfc, z0, znt)
 !-------------------------------------------------------------------
-    TYPE(SnowpackInterface), INTENT(IN) :: interface_data
+    TYPE(SnowpackInterface), INTENT(IN) :: snowpack_data
     
     ! WRF output variables
     REAL, INTENT(OUT) :: tsk, hfx, qfx, lh, albedo, snowc
     REAL, INTENT(OUT) :: snow, snowh, qsfc, z0, znt
     
     ! Unpack surface state
-    tsk = interface_data%surface%surface_temp
-    hfx = interface_data%surface%heat_sensible
-    qfx = interface_data%surface%heat_latent_kg
-    lh = interface_data%surface%heat_latent
-    albedo = interface_data%surface%albedo
-    snowc = interface_data%surface%snow_coverage
-    snow = interface_data%surface%snow_swe
-    snowh = interface_data%surface%snow_depth
-    qsfc = interface_data%surface%moisture_flux
-    z0 = interface_data%surface%roughness_mom
-    znt = interface_data%surface%roughness_heat
+    tsk = snowpack_data%surface%surface_temp
+    hfx = snowpack_data%surface%heat_sensible
+    qfx = snowpack_data%surface%heat_latent_kg
+    lh = snowpack_data%surface%heat_latent
+    albedo = snowpack_data%surface%albedo
+    snowc = snowpack_data%surface%snow_coverage
+    snow = snowpack_data%surface%snow_swe
+    snowh = snowpack_data%surface%snow_depth
+    qsfc = snowpack_data%surface%moisture_flux
+    z0 = snowpack_data%surface%roughness_mom
+    znt = snowpack_data%surface%roughness_heat
 
     ! Note: CRYOWRF atmospheric variables (friction_velocity, stability_param)
-    ! are available in interface_data%surface% but not used in standard WRF LSM interface
+    ! are available in snowpack_data%surface% but not used in standard WRF LSM interface
     
 END SUBROUTINE unpack_interface_to_wrf
 
 !-------------------------------------------------------------------
-SUBROUTINE snowpack_physics_structured(interface_data)
+SUBROUTINE snowpack_physics_structured(snowpack_data)
 !-------------------------------------------------------------------
 ! Structured interface to SNOWPACK physics with layer extraction
 !-------------------------------------------------------------------
     USE, INTRINSIC :: iso_c_binding
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
+    REAL(C_DOUBLE), PARAMETER :: RAD2DEG = 180.0_C_DOUBLE / 3.1415926535897932384626433832795_C_DOUBLE
+
+    ! Interface for C++ bridge function with proper BIND(C) to prevent name mangling
+    INTERFACE
+        SUBROUTINE snowpack_physics_c(meteo_ptr, output_ptr, layer_ptr, budget_ptr) BIND(C, name='snowpack_physics_c')
+            IMPORT :: C_PTR
+            TYPE(C_PTR), VALUE :: meteo_ptr
+            TYPE(C_PTR), VALUE :: output_ptr
+            TYPE(C_PTR), VALUE :: layer_ptr
+            TYPE(C_PTR), VALUE :: budget_ptr
+        END SUBROUTINE snowpack_physics_c
+    END INTERFACE
+
     
-        
-    ! Local variables for C interface
-    REAL(8) :: temp_air, humidity, wind_speed, wind_dir
-    REAL(8) :: shortwave_in, longwave_in, precipitation, pressure, height, dt
-    INTEGER :: i_grid, j_grid
-    REAL(8) :: snow_swe, snow_depth, surface_temp
-    REAL(8) :: heat_flux_sensible, heat_flux_latent, albedo, snow_coverage
-    REAL(8) :: friction_velocity, stability_param
-    
-    ! Layer arrays for detailed extraction
-    INTEGER :: n_layers
-    REAL(8), DIMENSION(100) :: layer_temp, layer_thick
-    REAL(8), DIMENSION(100) :: layer_vol_ice, layer_vol_water, layer_vol_air
-    REAL(8), DIMENSION(100) :: layer_grain_radius, layer_bond_radius
-    REAL(8), DIMENSION(100) :: layer_dendricity, layer_sphericity
-    
-    ! Budget tracking variables
-    REAL(8) :: mass_precip, mass_sublim, mass_melt, mass_swe, mass_refreeze
-    REAL(8) :: energy_lw_in, energy_lw_out, energy_sw_in, energy_sw_out
-    REAL(8) :: energy_sensible, energy_latent, energy_ground_flux, energy_rain, energy_total
-    
+    ! Local variables for C interface (use C-interoperable derived types)
+    TYPE(MeteoInput_C), TARGET :: meteo_c
+    TYPE(SnowpackOutput_C), TARGET :: output_c
+    TYPE(SnowpackLayerData_C), TARGET :: layers_c
+    TYPE(BudgetData_C), TARGET :: budgets_c
     INTEGER :: k
     
-    ! Pack data for C interface
-    temp_air = DBLE(interface_data%atmos%temperature)
-    humidity = DBLE(interface_data%atmos%humidity)
-    wind_speed = SQRT(interface_data%atmos%wind_u**2 + interface_data%atmos%wind_v**2)
-    wind_dir = ATAN2(interface_data%atmos%wind_v, interface_data%atmos%wind_u) * 180.0 / 3.14159
-    shortwave_in = DBLE(interface_data%atmos%shortwave_down)
-    longwave_in = DBLE(interface_data%atmos%longwave_down)  
-    precipitation = DBLE(interface_data%atmos%precipitation)
-    pressure = DBLE(interface_data%atmos%pressure)
-    height = DBLE(interface_data%atmos%height)
-    dt = DBLE(interface_data%config%dt)
-    
-    ! Use actual grid indices passed in from WRF
-    i_grid = interface_data%config%i_grid
-    j_grid = interface_data%config%j_grid
-    
-    ! Use the clean structured interface - build MeteoInput from interface_data
-    ! Note: We need to pass C structures by reference, so we'll need to create C bindings
-    ! for the Fortran interface_data structure. For now, use individual parameters.
+    ! Pack data into C-interoperable MeteoInput_C
+    meteo_c%temp_air = DBLE(snowpack_data%atmos%temperature)
+    meteo_c%humidity = DBLE(snowpack_data%atmos%humidity)
+    meteo_c%wind_speed = SQRT(DBLE(snowpack_data%atmos%wind_u)**2 + DBLE(snowpack_data%atmos%wind_v)**2)
+    meteo_c%wind_dir = ATAN2(DBLE(snowpack_data%atmos%wind_v), DBLE(snowpack_data%atmos%wind_u)) * RAD2DEG
+    meteo_c%shortwave_in = DBLE(snowpack_data%atmos%shortwave_down)
+    meteo_c%longwave_in = DBLE(snowpack_data%atmos%longwave_down)
+    meteo_c%precipitation = DBLE(snowpack_data%atmos%precipitation)
+    meteo_c%pressure = DBLE(snowpack_data%atmos%pressure)
+    meteo_c%height = DBLE(snowpack_data%atmos%height)
+    meteo_c%dt = DBLE(snowpack_data%config%dt)
+    meteo_c%i_grid = snowpack_data%config%i_grid
+    meteo_c%j_grid = snowpack_data%config%j_grid
+    meteo_c%wrf_lat = DBLE(snowpack_data%atmos%latitude)
+    meteo_c%wrf_lon = DBLE(snowpack_data%atmos%longitude)
 
-    ! Direct call to clean C++ interface (individual parameters for compatibility)
-    CALL snowpack_physics_individual_c(temp_air, humidity, wind_speed, wind_dir, &
-                                       shortwave_in, longwave_in, precipitation, pressure, height, dt, &
-                                       i_grid, j_grid, DBLE(interface_data%atmos%latitude), DBLE(interface_data%atmos%longitude), &
-                                       snow_swe, snow_depth, surface_temp, &
-                                       heat_flux_sensible, heat_flux_latent, albedo, snow_coverage)
+    ! Initialize optional outputs to safe defaults
+    output_c%snow_swe = 0.0
+    output_c%snow_depth = 0.0
+    output_c%surface_temp = 0.0
+    output_c%heat_flux_sensible = 0.0
+    output_c%heat_flux_latent = 0.0
+    output_c%albedo = 0.0
+    output_c%snow_coverage = 0.0
+    output_c%friction_velocity = 0.0
+    output_c%stability_param = 0.0
 
-    ! Extract layer data using the clean extraction interface (convert double precision to single precision)
-    CALL extract_snowpack_layers_c(i_grid, j_grid, &
-                                   REAL(layer_temp, 4), REAL(layer_thick, 4), &
-                                   REAL(layer_vol_ice, 4), REAL(layer_vol_water, 4), REAL(layer_vol_air, 4), &
-                                   REAL(layer_grain_radius, 4), REAL(layer_bond_radius, 4), &
-                                   REAL(layer_dendricity, 4), REAL(layer_sphericity, 4), &
-                                   n_layers)
+    layers_c%n_layers = 0
+    layers_c%layer_temp = 0.0_C_DOUBLE
+    layers_c%layer_thick = 0.0_C_DOUBLE
+    layers_c%layer_vol_ice = 0.0_C_DOUBLE
+    layers_c%layer_vol_water = 0.0_C_DOUBLE
+    layers_c%layer_vol_air = 0.0_C_DOUBLE
+    layers_c%layer_grain_radius = 0.0_C_DOUBLE
+    layers_c%layer_bond_radius = 0.0_C_DOUBLE
+    layers_c%layer_dendricity = 0.0_C_DOUBLE
+    layers_c%layer_sphericity = 0.0_C_DOUBLE
+
+    budgets_c%mass_precip = 0.0_C_DOUBLE
+    budgets_c%mass_sublim = 0.0_C_DOUBLE
+    budgets_c%mass_melt = 0.0_C_DOUBLE
+    budgets_c%mass_swe = 0.0_C_DOUBLE
+    budgets_c%mass_refreeze = 0.0_C_DOUBLE
+    budgets_c%energy_lw_in = 0.0_C_DOUBLE
+    budgets_c%energy_lw_out = 0.0_C_DOUBLE
+    budgets_c%energy_sw_in = 0.0_C_DOUBLE
+    budgets_c%energy_sw_out = 0.0_C_DOUBLE
+    budgets_c%energy_sensible = 0.0_C_DOUBLE
+    budgets_c%energy_latent = 0.0_C_DOUBLE
+    budgets_c%energy_ground_flux = 0.0_C_DOUBLE
+    budgets_c%energy_rain = 0.0_C_DOUBLE
+    budgets_c%energy_total = 0.0_C_DOUBLE
+
+    ! Call the C++ bridge using the C-interoperable derived types
+    CALL snowpack_physics_c(C_LOC(meteo_c), C_LOC(output_c), C_LOC(layers_c), C_LOC(budgets_c))
 
     ! Unpack surface results back to interface structure
-    interface_data%surface%snow_swe = REAL(snow_swe)
-    interface_data%surface%snow_depth = REAL(snow_depth) 
-    interface_data%surface%surface_temp = REAL(surface_temp)
-    interface_data%surface%heat_sensible = REAL(heat_flux_sensible)
-    interface_data%surface%heat_latent = REAL(heat_flux_latent)
-    interface_data%surface%albedo = REAL(albedo)
-    interface_data%surface%snow_coverage = REAL(snow_coverage)
-    interface_data%surface%friction_velocity = REAL(friction_velocity)
-    interface_data%surface%stability_param = REAL(stability_param)
-    
+    snowpack_data%surface%snow_swe = REAL(output_c%snow_swe)
+    snowpack_data%surface%snow_depth = REAL(output_c%snow_depth)
+    snowpack_data%surface%surface_temp = REAL(output_c%surface_temp)
+    snowpack_data%surface%heat_sensible = REAL(output_c%heat_flux_sensible)
+    snowpack_data%surface%heat_latent = REAL(output_c%heat_flux_latent)
+    snowpack_data%surface%albedo = REAL(output_c%albedo)
+    snowpack_data%surface%snow_coverage = REAL(output_c%snow_coverage)
+    snowpack_data%surface%friction_velocity = REAL(output_c%friction_velocity)
+    snowpack_data%surface%stability_param = REAL(output_c%stability_param)
+
     ! Store extracted layer data
-    interface_data%layers%n_layers = n_layers
-    DO k = 1, MIN(n_layers, MAX_SNOW_LAYERS)
-        interface_data%layers%layer_temp(k) = REAL(layer_temp(k))
-        interface_data%layers%layer_thick(k) = REAL(layer_thick(k))
-        interface_data%layers%vol_ice(k) = REAL(layer_vol_ice(k))
-        interface_data%layers%vol_water(k) = REAL(layer_vol_water(k))
-        interface_data%layers%vol_air(k) = REAL(layer_vol_air(k))
-        interface_data%layers%grain_radius(k) = REAL(layer_grain_radius(k))
-        interface_data%layers%bond_radius(k) = REAL(layer_bond_radius(k))
-        interface_data%layers%dendricity(k) = REAL(layer_dendricity(k))
-        interface_data%layers%sphericity(k) = REAL(layer_sphericity(k))
+    snowpack_data%layers%n_layers = MIN(INT(layers_c%n_layers), MAX_SNOW_LAYERS)
+    DO k = 1, snowpack_data%layers%n_layers
+        snowpack_data%layers%layer_temp(k) = REAL(layers_c%layer_temp(k))
+        snowpack_data%layers%layer_thick(k) = REAL(layers_c%layer_thick(k))
+        snowpack_data%layers%vol_ice(k) = REAL(layers_c%layer_vol_ice(k))
+        snowpack_data%layers%vol_water(k) = REAL(layers_c%layer_vol_water(k))
+        snowpack_data%layers%vol_air(k) = REAL(layers_c%layer_vol_air(k))
+        snowpack_data%layers%grain_radius(k) = REAL(layers_c%layer_grain_radius(k))
+        snowpack_data%layers%bond_radius(k) = REAL(layers_c%layer_bond_radius(k))
+        snowpack_data%layers%dendricity(k) = REAL(layers_c%layer_dendricity(k))
+        snowpack_data%layers%sphericity(k) = REAL(layers_c%layer_sphericity(k))
     END DO
-    
-    ! Clear unused layers
-    DO k = n_layers+1, MAX_SNOW_LAYERS
-        interface_data%layers%layer_temp(k) = 0.0
-        interface_data%layers%layer_thick(k) = 0.0
-        interface_data%layers%vol_ice(k) = 0.0
-        interface_data%layers%vol_water(k) = 0.0
-        interface_data%layers%vol_air(k) = 0.0
-        interface_data%layers%grain_radius(k) = 0.0
-        interface_data%layers%bond_radius(k) = 0.0
-        interface_data%layers%dendricity(k) = 0.0
-        interface_data%layers%sphericity(k) = 0.0
+
+    ! Clear remaining layers
+    DO k = snowpack_data%layers%n_layers + 1, MAX_SNOW_LAYERS
+        snowpack_data%layers%layer_temp(k) = 0.0
+        snowpack_data%layers%layer_thick(k) = 0.0
+        snowpack_data%layers%vol_ice(k) = 0.0
+        snowpack_data%layers%vol_water(k) = 0.0
+        snowpack_data%layers%vol_air(k) = 0.0
+        snowpack_data%layers%grain_radius(k) = 0.0
+        snowpack_data%layers%bond_radius(k) = 0.0
+        snowpack_data%layers%dendricity(k) = 0.0
+        snowpack_data%layers%sphericity(k) = 0.0
     END DO
-    
-    ! Store mass budget data
-    interface_data%budgets%mass_precip = REAL(mass_precip)
-    interface_data%budgets%mass_sublim = REAL(mass_sublim)
-    interface_data%budgets%mass_melt = REAL(mass_melt)
-    
-    ! Store energy budget data
-    interface_data%budgets%energy_lw_in = REAL(energy_lw_in)
-    interface_data%budgets%energy_sensible = REAL(energy_sensible)
-    interface_data%budgets%energy_latent = REAL(energy_latent)
-    
+
+    ! Store budget data
+    snowpack_data%budgets%mass_precip = REAL(budgets_c%mass_precip)
+    snowpack_data%budgets%mass_sublim = REAL(budgets_c%mass_sublim)
+    snowpack_data%budgets%mass_melt = REAL(budgets_c%mass_melt)
+    snowpack_data%budgets%mass_swe = REAL(budgets_c%mass_swe)
+    snowpack_data%budgets%mass_refreeze = REAL(budgets_c%mass_refreeze)
+    snowpack_data%budgets%energy_lw_in = REAL(budgets_c%energy_lw_in)
+    snowpack_data%budgets%energy_lw_out = REAL(budgets_c%energy_lw_out)
+    snowpack_data%budgets%energy_sw_in = REAL(budgets_c%energy_sw_in)
+    snowpack_data%budgets%energy_sw_out = REAL(budgets_c%energy_sw_out)
+    snowpack_data%budgets%energy_sensible = REAL(budgets_c%energy_sensible)
+    snowpack_data%budgets%energy_latent = REAL(budgets_c%energy_latent)
+    snowpack_data%budgets%energy_ground = REAL(budgets_c%energy_ground_flux)
+    snowpack_data%budgets%energy_rain = REAL(budgets_c%energy_rain)
+    snowpack_data%budgets%energy_total = REAL(budgets_c%energy_total)
+
     ! Calculate additional budget components if enabled
-    IF (interface_data%config%enable_mass_budgets) THEN
-        CALL update_mass_budgets_structured(interface_data)
+    IF (snowpack_data%config%enable_mass_budgets) THEN
+        CALL update_mass_budgets_structured(snowpack_data)
     END IF
-    
-    IF (interface_data%config%enable_energy_budgets) THEN
-        CALL update_energy_budgets_structured(interface_data)
+
+    IF (snowpack_data%config%enable_energy_budgets) THEN
+        CALL update_energy_budgets_structured(snowpack_data)
     END IF
 
     ! Update soil state based on surface conditions
-    interface_data%soil%temperature = interface_data%surface%surface_temp  ! Soil temp follows surface temp
+    snowpack_data%soil%temperature = snowpack_data%surface%surface_temp  ! Soil temp follows surface temp
 
 END SUBROUTINE snowpack_physics_structured
 
 !-------------------------------------------------------------------
-SUBROUTINE update_mass_budgets_structured(interface_data)
+SUBROUTINE update_mass_budgets_structured(snowpack_data)
 !-------------------------------------------------------------------
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     
     REAL :: dt_hours
     
-    dt_hours = interface_data%config%dt / 3600.0
+    dt_hours = snowpack_data%config%dt / 3600.0
     
     ! Precipitation contribution
-    interface_data%budgets%mass_precip = interface_data%atmos%precipitation * dt_hours
+    snowpack_data%budgets%mass_precip = snowpack_data%atmos%precipitation * dt_hours
     
     ! Accumulate snowfall if temperature is cold enough
-    IF (interface_data%atmos%temperature < 273.15) THEN
-        interface_data%budgets%accum_snowfall = interface_data%budgets%accum_snowfall + &
-                                               interface_data%budgets%mass_precip
+    IF (snowpack_data%atmos%temperature < 273.15) THEN
+        snowpack_data%budgets%accum_snowfall = snowpack_data%budgets%accum_snowfall + &
+                                               snowpack_data%budgets%mass_precip
     END IF
     
     ! Simple sublimation estimate from latent heat flux
-    IF (interface_data%surface%heat_latent_kg < 0.0) THEN
-        interface_data%budgets%mass_sublim = interface_data%surface%heat_latent_kg * dt_hours
-        interface_data%budgets%accum_sublim = interface_data%budgets%accum_sublim + &
-                                             ABS(interface_data%budgets%mass_sublim)
+    IF (snowpack_data%surface%heat_latent_kg < 0.0) THEN
+        snowpack_data%budgets%mass_sublim = snowpack_data%surface%heat_latent_kg * dt_hours
+        snowpack_data%budgets%accum_sublim = snowpack_data%budgets%accum_sublim + &
+                                             ABS(snowpack_data%budgets%mass_sublim)
     END IF
     
 END SUBROUTINE update_mass_budgets_structured
 
 !-------------------------------------------------------------------
-SUBROUTINE update_energy_budgets_structured(interface_data)
+SUBROUTINE update_energy_budgets_structured(snowpack_data)
 !-------------------------------------------------------------------
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     
     REAL :: dt_sec
     
-    dt_sec = interface_data%config%dt
+    dt_sec = snowpack_data%config%dt
     
     ! Energy budget components [J/m²] over timestep
-    interface_data%budgets%energy_sw_in = interface_data%atmos%shortwave_down * dt_sec
-    interface_data%budgets%energy_sw_out = interface_data%atmos%shortwave_down * &
-                                          interface_data%surface%albedo * dt_sec
-    interface_data%budgets%energy_lw_in = interface_data%atmos%longwave_down * dt_sec
-    interface_data%budgets%energy_sensible = interface_data%surface%heat_sensible * dt_sec
-    interface_data%budgets%energy_latent = interface_data%surface%heat_latent * dt_sec
+    snowpack_data%budgets%energy_sw_in = snowpack_data%atmos%shortwave_down * dt_sec
+    snowpack_data%budgets%energy_sw_out = snowpack_data%atmos%shortwave_down * &
+                                          snowpack_data%surface%albedo * dt_sec
+    snowpack_data%budgets%energy_lw_in = snowpack_data%atmos%longwave_down * dt_sec
+    snowpack_data%budgets%energy_sensible = snowpack_data%surface%heat_sensible * dt_sec
+    snowpack_data%budgets%energy_latent = snowpack_data%surface%heat_latent * dt_sec
     
 END SUBROUTINE update_energy_budgets_structured
 
 !-------------------------------------------------------------------
-SUBROUTINE extract_layer_diagnostics_structured(interface_data)
+SUBROUTINE extract_layer_diagnostics_structured(snowpack_data)
 !-------------------------------------------------------------------
     ! This routine is now obsolete - layer extraction happens directly in snowpack_physics_structured
     ! Kept for backward compatibility but does nothing
-    TYPE(SnowpackInterface), INTENT(INOUT) :: interface_data
+    TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     ! Layer data is now populated directly from SNOWPACK in snowpack_physics_structured
 END SUBROUTINE extract_layer_diagnostics_structured
 

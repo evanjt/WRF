@@ -63,7 +63,7 @@ CONTAINS
      &          ,shgxy    ,shcxy     ,shbxy     ,evgxy     ,evbxy     ,ghvxy        &
      &          ,ghbxy    ,irgxy     ,ircxy     ,irbxy     ,trxy      ,evcxy        &
      &          ,chleafxy ,chucxy    ,chv2xy    ,chb2xy    ,chstarxy                &            
-           ! Noah-MP extra output fields
+                !   Noah-MP extra output fields
      &          ,qintsxy   ,qintrxy   ,qdripsxy ,qdriprxy  ,qthrosxy  ,qthrorxy     &
      &          ,qsnsubxy  ,qsnfroxy  ,qsubcxy  ,qfrocxy   ,qevacxy   ,qdewcxy      &
      &          ,qfrzcxy   ,qmeltcxy  ,qsnbotxy ,pondingxy ,PAHXY     ,PAHGXY       &
@@ -4389,23 +4389,25 @@ CONTAINS
 
          CALL wrf_debug(100,'in SNOWPACK LSM')
          
-         ! Call SNOWPACK driver with CRYOWRF arrays for layer diagnostics and budgets
-         ! Arrays are properly declared as OPTIONAL DUMMY parameters in both interfaces
-         CALL snowpacklsm(itimestep,xlat,xlong,dz8w,dt,dx,               &
-               ivgtyp,   isltyp,    xland,     xice,xice_threshold,       &
-               t_phy,     qv_curr,     u_phy,    v_phy,   swdown,   glw,  &
-               p8w,rainbl,                                                 &
-               tsk,      hfx,      qfx,        lh,   grdflx,    smstav,   &
-               smstot,sfcrunoff, udrunoff,    albedo,    snowc,     smois, &
-               sh2o,     tslb,     snow,     snowh,   canwat,    acsnom,  &
-               acsnow,    emiss,     qsfc,                                 &
-               z0,      znt,                                               &
-               sn_t,sn_thick,sn_voli,sn_volw,sn_volv,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers, &
-               m_budg_precip,m_budg_sublim,m_budg_melt,                   &
-               e_budg_lw_in,e_budg_sensible,e_budg_latent,                &
-               ids,ide,  jds,jde,  kds,kde,                               &
-               ims,ime,  jms,jme,  kms,kme,                               &
-               i_start(ij),i_end(ij), j_start(ij),j_end(ij), kts,kte     )
+          ! Call SNOWPACK driver with CRYOWRF arrays for layer diagnostics and budgets
+          ! Arrays are properly declared as OPTIONAL DUMMY parameters in both interfaces
+          CALL snowpacklsm(                                     &
+            itimestep, xlat, xlong, dz8w, dt, dx,               &
+            ivgtyp, isltyp, xland, xice, xice_threshold,        &
+            t_phy, qv_curr, u_phy, v_phy, swdown, glw,          &
+            p8w, rainbl,                                        &
+            tsk, hfx, qfx, lh, grdflx, smstav,                  &
+            smstot, sfcrunoff, udrunoff, albedo, snowc, smois,  &
+            sh2o, tslb, snow, snowh, canwat, acsnom,            &
+            acsnow, emiss, qsfc,                                &
+            z0, znt,                                            &
+            sn_t, sn_thick, sn_voli, sn_volw, sn_volv, sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers, &
+            m_budg_precip, m_budg_sublim, m_budg_melt, &
+            e_budg_lw_in, e_budg_sensible, e_budg_latent, &
+            ids, ide, jds, jde, kds, kde, &
+            ims, ime, jms, jme, kms, kme, &
+            i_start(ij), i_end(ij), j_start(ij), j_end(ij), kts, kte &
+          )
                
          ! Calculate surface diagnostics
          DO j=j_start(ij),j_end(ij)
