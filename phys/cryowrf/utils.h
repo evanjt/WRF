@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <algorithm>
 
-#include "snowpack_bridge_structs.h"
+#include "structs.h"
 #include "meteoio/meteoio/MeteoIO.h"
 
 // Forward declarations to avoid circular dependency
