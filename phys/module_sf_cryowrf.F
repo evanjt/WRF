@@ -220,7 +220,14 @@
       tsk(i,j)    = REAL(surface_temp_c)            ! Update surface temperature
       hfx(i,j)    = REAL(heat_sens_c)               ! Sensible heat flux [W/m2]
       lh(i,j)     = REAL(heat_lat_c)                ! Latent heat flux [W/m2]
-      qfx(i,j)    = REAL(heat_lat_c) / 2.5e6        ! Moisture flux [kg/m2/s] (approx)
+
+      ! Temperature-dependent latent heat conversion following CRYOWRF approach
+      ! CRYOWRF: module_sf_snowpacklsm.F:763-767
+      IF (surface_temp_c > 273.15) THEN
+          qfx(i,j)    = REAL(heat_lat_c) / 2.5104e6  ! Moisture flux for liquid water [kg/m2/s]
+      ELSE
+          qfx(i,j)    = REAL(heat_lat_c) / 2.8440e6  ! Moisture flux for ice [kg/m2/s]
+      ENDIF
       albedo(i,j) = REAL(albedo_c)                  ! Surface albedo [0-1]
       snowc(i,j)  = REAL(snow_cov_c)                ! Snow coverage fraction [0-1]
 

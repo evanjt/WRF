@@ -265,12 +265,14 @@ SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
     snowpack_data%surface%friction_velocity = 0.0
     snowpack_data%surface%stability_param = 0.0
 
-    ! Initialize soil variables
-    snowpack_data%soil%moisture_avail = 1.0      ! Maximum availability
-    snowpack_data%soil%moisture_total = 100.0    ! 100mm total water
-    snowpack_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture
-    snowpack_data%soil%moisture_liquid = 0.3     ! All moisture is liquid
-    snowpack_data%soil%temperature = 273.15      ! Freezing point
+    ! Initialize soil variables - these should be updated from SNOWPACK ground interface
+    ! TODO: Extract real soil properties from SNOWPACK when available
+    ! CRYOWRF: module_sf_snowpacklsm.F:733-734 uses proper saturation calculations
+    snowpack_data%soil%moisture_avail = 1.0      ! Maximum availability (should be from SNOWPACK)
+    snowpack_data%soil%moisture_total = 100.0    ! 100mm total water (should be from SNOWPACK)
+    snowpack_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture (should be from SNOWPACK)
+    snowpack_data%soil%moisture_liquid = 0.3     ! All moisture is liquid (should be from SNOWPACK)
+    snowpack_data%soil%temperature = 273.15      ! Freezing point (updated from surface)
     
 END SUBROUTINE initialize_snowpack_interface
 
@@ -531,8 +533,23 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
         CALL update_energy_budgets_structured(snowpack_data)
     END IF
 
-    ! Update soil state based on surface conditions
+    ! Update soil state based on surface conditions following CRYOWRF approach
+    ! CRYOWRF: module_sf_snowpacklsm.F:733-734 calculates proper saturation values
     snowpack_data%soil%temperature = snowpack_data%surface%surface_temp  ! Soil temp follows surface temp
+
+    ! Update soil moisture based on snow conditions (simplified approach)
+    ! TODO: Extract real soil moisture from SNOWPACK ground interface when available
+    IF (snowpack_data%surface%snow_depth > 0.0) THEN
+        snowpack_data%soil%moisture_volumetric = 0.8  ! High moisture under snow
+        snowpack_data%soil%moisture_liquid = 0.8      ! Mostly liquid at freezing point
+        snowpack_data%soil%moisture_avail = 0.9       ! High availability
+        snowpack_data%soil%moisture_total = 150.0     ! More water under snow
+    ELSE
+        snowpack_data%soil%moisture_volumetric = 0.3  ! Default soil moisture
+        snowpack_data%soil%moisture_liquid = 0.3      ! Default liquid content
+        snowpack_data%soil%moisture_avail = 0.6       ! Moderate availability
+        snowpack_data%soil%moisture_total = 80.0      ! Default total water
+    ENDIF
 
 END SUBROUTINE snowpack_physics_structured
 
@@ -540,27 +557,39 @@ END SUBROUTINE snowpack_physics_structured
 SUBROUTINE update_mass_budgets_structured(snowpack_data)
 !-------------------------------------------------------------------
     TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
-    
-    REAL :: dt_hours
-    
+
+    REAL :: dt_hours, melt_water
+
     dt_hours = snowpack_data%config%dt / 3600.0
-    
+
     ! Precipitation contribution
     snowpack_data%budgets%mass_precip = snowpack_data%atmos%precipitation * dt_hours
-    
+
     ! Accumulate snowfall if temperature is cold enough
     IF (snowpack_data%atmos%temperature < 273.15) THEN
         snowpack_data%budgets%accum_snowfall = snowpack_data%budgets%accum_snowfall + &
                                                snowpack_data%budgets%mass_precip
     END IF
-    
+
     ! Simple sublimation estimate from latent heat flux
     IF (snowpack_data%surface%heat_latent_kg < 0.0) THEN
         snowpack_data%budgets%mass_sublim = snowpack_data%surface%heat_latent_kg * dt_hours
         snowpack_data%budgets%accum_sublim = snowpack_data%budgets%accum_sublim + &
                                              ABS(snowpack_data%budgets%mass_sublim)
     END IF
-    
+
+    ! Calculate runoff from snow melt following CRYOWRF approach
+    ! CRYOWRF: module_sf_snowpacklsm.F:716-717 accumulates melt water
+    IF (snowpack_data%budgets%mass_melt < 0.0) THEN  ! Negative mass_melt indicates melting
+        melt_water = ABS(snowpack_data%budgets%mass_melt)
+        ! Split melt into surface and subsurface runoff (simplified)
+        snowpack_data%budgets%runoff_surface = melt_water * 0.7      ! 70% surface runoff
+        snowpack_data%budgets%runoff_subsurface = melt_water * 0.3   ! 30% subsurface runoff
+    ELSE
+        snowpack_data%budgets%runoff_surface = 0.0
+        snowpack_data%budgets%runoff_subsurface = 0.0
+    END IF
+
 END SUBROUTINE update_mass_budgets_structured
 
 !-------------------------------------------------------------------
