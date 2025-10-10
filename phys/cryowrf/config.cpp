@@ -3,15 +3,42 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <limits.h>
 
 #include "meteoio/meteoio/MeteoIO.h"
+#include "snowpack/SnowpackConfig.h"
 #include "config.h"
 
 // SnowpackConfigManager implementation
 mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file_path) {
     try {
-        mio::Config config(ini_file_path);
-        
+        // Use SnowpackConfig instead of mio::Config to get SNOWPACK defaults
+
+        // Get absolute path
+        char abs_path[PATH_MAX];
+        if (realpath(ini_file_path.c_str(), abs_path) != NULL) {
+            printf("SNOWPACK-DEBUG: Loading SnowpackConfig from %s (absolute: %s)\n", ini_file_path.c_str(), abs_path);
+        } else {
+            printf("SNOWPACK-DEBUG: Loading SnowpackConfig from %s (could not resolve absolute path)\n", ini_file_path.c_str());
+        }
+
+        SnowpackConfig config(ini_file_path);
+
+        // Check if SNOW_WRITE exists in the configuration
+        if (config.keyExists("SNOW_WRITE", "Output")) {
+            printf("SNOWPACK-DEBUG: SNOW_WRITE found in Output section\n");
+            std::string snow_write_value = config.get("SNOW_WRITE", "Output");
+            printf("SNOWPACK-DEBUG: SNOW_WRITE value = '%s'\n", snow_write_value.c_str());
+        } else {
+            printf("SNOWPACK-DEBUG: SNOW_WRITE NOT found in Output section\n");
+        }
+
+        // Check for other missing parameters
+        printf("SNOWPACK-DEBUG: Checking for missing parameters...\n");
+        printf("SNOWPACK-DEBUG: RIME_INDEX exists: %s\n", config.keyExists("RIME_INDEX", "SnowpackAdvanced") ? "YES" : "NO");
+        printf("SNOWPACK-DEBUG: WATER_LAYER exists: %s\n", config.keyExists("WATER_LAYER", "SnowpackAdvanced") ? "YES" : "NO");
+        printf("SNOWPACK-DEBUG: TIME_ZONE exists: %s\n", config.keyExists("TIME_ZONE", "Input") ? "YES" : "NO");
+
         const double calculation_step_length = config.get("CALCULATION_STEP_LENGTH", "Snowpack");
         const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds
 
