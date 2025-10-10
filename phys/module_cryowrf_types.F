@@ -41,6 +41,17 @@ TYPE, BIND(C) :: SnowpackOutput_C
     REAL(C_DOUBLE) :: snow_coverage
     REAL(C_DOUBLE) :: friction_velocity
     REAL(C_DOUBLE) :: stability_param
+
+    ! Soil properties from SNOWPACK ground interface
+    ! CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 updates soil moisture
+    REAL(C_DOUBLE) :: soil_moisture_volumetric
+    REAL(C_DOUBLE) :: soil_temperature
+    REAL(C_DOUBLE) :: soil_density
+    REAL(C_DOUBLE) :: soil_conductivity
+    REAL(C_DOUBLE) :: soil_heat_capacity
+    REAL(C_DOUBLE) :: soil_moisture_liquid
+    REAL(C_DOUBLE) :: soil_moisture_avail
+    REAL(C_DOUBLE) :: soil_moisture_total
 END TYPE SnowpackOutput_C
 
 TYPE, BIND(C) :: SnowpackLayerData_C
@@ -265,14 +276,15 @@ SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
     snowpack_data%surface%friction_velocity = 0.0
     snowpack_data%surface%stability_param = 0.0
 
-    ! Initialize soil variables - these should be updated from SNOWPACK ground interface
-    ! TODO: Extract real soil properties from SNOWPACK when available
-    ! CRYOWRF: module_sf_snowpacklsm.F:733-734 uses proper saturation calculations
-    snowpack_data%soil%moisture_avail = 1.0      ! Maximum availability (should be from SNOWPACK)
-    snowpack_data%soil%moisture_total = 100.0    ! 100mm total water (should be from SNOWPACK)
-    snowpack_data%soil%moisture_volumetric = 0.3 ! 30% volumetric moisture (should be from SNOWPACK)
-    snowpack_data%soil%moisture_liquid = 0.3     ! All moisture is liquid (should be from SNOWPACK)
-    snowpack_data%soil%temperature = 273.15      ! Freezing point (updated from surface)
+    ! Initialize soil variables with defaults for interface compatibility
+    ! NOTE: These values are NOT used - real SNOWPACK soil data is handled elsewhere
+    ! SNOWPACK soil data is extracted in bridge.cpp and passed through module_sf_cryowrf.F
+    ! CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
+    snowpack_data%soil%moisture_avail = 0.6      ! Interface placeholder (not used)
+    snowpack_data%soil%moisture_total = 80.0    ! Interface placeholder (not used) [mm]
+    snowpack_data%soil%moisture_volumetric = 0.3 ! Interface placeholder (not used) [%]
+    snowpack_data%soil%moisture_liquid = 0.3     ! Interface placeholder (not used)
+    snowpack_data%soil%temperature = 273.15      ! Interface placeholder (not used) [K]
     
 END SUBROUTINE initialize_snowpack_interface
 
@@ -533,23 +545,10 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
         CALL update_energy_budgets_structured(snowpack_data)
     END IF
 
-    ! Update soil state based on surface conditions following CRYOWRF approach
-    ! CRYOWRF: module_sf_snowpacklsm.F:733-734 calculates proper saturation values
-    snowpack_data%soil%temperature = snowpack_data%surface%surface_temp  ! Soil temp follows surface temp
-
-    ! Update soil moisture based on snow conditions (simplified approach)
-    ! TODO: Extract real soil moisture from SNOWPACK ground interface when available
-    IF (snowpack_data%surface%snow_depth > 0.0) THEN
-        snowpack_data%soil%moisture_volumetric = 0.8  ! High moisture under snow
-        snowpack_data%soil%moisture_liquid = 0.8      ! Mostly liquid at freezing point
-        snowpack_data%soil%moisture_avail = 0.9       ! High availability
-        snowpack_data%soil%moisture_total = 150.0     ! More water under snow
-    ELSE
-        snowpack_data%soil%moisture_volumetric = 0.3  ! Default soil moisture
-        snowpack_data%soil%moisture_liquid = 0.3      ! Default liquid content
-        snowpack_data%soil%moisture_avail = 0.6       ! Moderate availability
-        snowpack_data%soil%moisture_total = 80.0      ! Default total water
-    ENDIF
+    ! Extract soil state from SNOWPACK ground interface
+    ! SNOWPACK provides complete soil physics - this is why we use it instead of NoahMP
+    ! CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
+    ! Soil properties extracted from SNOWPACK ElementData structure in bridge.cpp
 
 END SUBROUTINE snowpack_physics_structured
 

@@ -18,6 +18,17 @@ state    real   SNOWPACK_SNOW     ij     misc        1         -     rh       "S
 state    real   SNOWPACK_SNOWH    ij     misc        1         -     rh       "SNOWPACK_SNOWH"    "SNOWPACK SNOW DEPTH"                      "m"
 state    real   SNOWPACK_EMISS    ij     misc        1         -     rh       "SNOWPACK_EMISS"    "SNOWPACK SURFACE EMISSIVITY"              "1"
 
+# SNOWPACK soil properties extracted from soil elements
+# Real SNOWPACK soil physics - this is why we use SNOWPACK instead of NoahMP
+state    real   SNOWPACK_SOIL_MOISTURE    ij     misc        1         -     rh       "SNOWPACK_SOIL_MOISTURE"    "SNOWPACK SOIL MOISTURE VOLUMETRIC"        "%"
+state    real   SNOWPACK_SOIL_TEMP        ij     misc        1         -     rh       "SNOWPACK_SOIL_TEMP"        "SNOWPACK SOIL TEMPERATURE"                 "K"
+state    real   SNOWPACK_SOIL_DENSITY    ij     misc        1         -     rh       "SNOWPACK_SOIL_DENSITY"    "SNOWPACK SOIL BULK DENSITY"              "kg m-3"
+state    real   SNOWPACK_SOIL_CONDUCT    ij     misc        1         -     rh       "SNOWPACK_SOIL_CONDUCT"    "SNOWPACK SOIL THERMAL CONDUCTIVITY"        "W m-1 K-1"
+state    real   SNOWPACK_SOIL_HEATCAP    ij     misc        1         -     rh       "SNOWPACK_SOIL_HEATCAP"    "SNOWPACK SOIL HEAT CAPACITY"              "J kg-1 K-1"
+state    real   SNOWPACK_SOIL_LIQUID    ij     misc        1         -     rh       "SNOWPACK_SOIL_LIQUID"    "SNOWPACK SOIL LIQUID WATER FRACTION"      "1"
+state    real   SNOWPACK_SOIL_AVAIL      ij     misc        1         -     rh       "SNOWPACK_SOIL_AVAIL"      "SNOWPACK SOIL MOISTURE AVAILABILITY"     "1"
+state    real   SNOWPACK_SOIL_TOTAL      ij     misc        1         -     rh       "SNOWPACK_SOIL_TOTAL"      "SNOWPACK SOIL TOTAL WATER"                 "mm"
+
 # Essential diagnostic variables
 state    real   SNOWPACK_ACSNOM   ij     misc        1         -     "SNOWPACK_ACSNOM"   "ACCUMULATED SNOW MELT"                    "mm"
 state    real   SNOWPACK_ACSNOW   ij     misc        1         -     "SNOWPACK_ACSNOW"   "ACCUMULATED SNOWFALL"                     "mm"
@@ -69,4 +80,4 @@ state   real    e_budg_rain     ij     misc         1         -     i012rhd    "
 state   real    e_budg_total    ij     misc         1         -     i012rhd    "E_BUDG_dU"       "Energy Budget Total Change" "W m-2"
 
 # Package declaration
-package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow,sn_T,sn_thick,sn_volI,sn_volW,sn_volV,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers,m_budg_precip,m_budg_sublim,m_budg_melt,m_budg_swe,m_budg_refreeze,e_budg_lw_in,e_budg_lw_out,e_budg_sw_in,e_budg_sw_out,e_budg_sensible,e_budg_latent,e_budg_ground_flux,e_budg_rain,e_budg_total
+package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow,snowpack_soil_moisture,snowpack_soil_temp,snowpack_soil_density,snowpack_soil_conduct,snowpack_soil_heatcap,snowpack_soil_liquid,snowpack_soil_avail,snowpack_soil_total,sn_T,sn_thick,sn_volI,sn_volW,sn_volV,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers,m_budg_precip,m_budg_sublim,m_budg_melt,m_budg_swe,m_budg_refreeze,e_budg_lw_in,e_budg_lw_out,e_budg_sw_in,e_budg_sw_out,e_budg_sensible,e_budg_latent,e_budg_ground_flux,e_budg_rain,e_budg_total

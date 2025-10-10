@@ -46,16 +46,12 @@ bool load_station_state(const std::string& station_key,
         std::string sno_filename = "snpack_" + std::to_string(wrf_domain_id) + "_" +
                                   std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
 
-        printf("SNOWPACK-INIT [%d,%d]: Attempting to load .sno file: %s\n", i_grid, j_grid, sno_filename.c_str());
-
         // Attempt to read existing snowpack state
         SN_SNOWSOIL_DATA ssdata;
         ZwischenData zdata;
         mio::Date profile_date;
 
-        printf("SNOWPACK-INIT [%d,%d]: Calling readSnowCover()...\n", i_grid, j_grid);
         io->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
-        printf("SNOWPACK-INIT [%d,%d]: readSnowCover() returned %zu layers\n", i_grid, j_grid, ssdata.nLayers);
 
         ssdata.meta.position = position;        // Set position with coordinates from WRF
         ssdata.meta.stationID = stationID;      // Set station ID
@@ -86,7 +82,6 @@ bool load_station_state(const std::string& station_key,
             station->Edata[e].heatCapacity();
         }
 
-        printf("SNOWPACK-INIT [%d,%d]: Successfully loaded station state from %s\n", i_grid, j_grid, sno_filename.c_str());
         return true;
 
     } catch (const std::exception& e) {

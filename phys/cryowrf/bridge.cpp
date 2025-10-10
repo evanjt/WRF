@@ -151,6 +151,101 @@ void extract_surface_outputs(const SnowStation& station,
         output.friction_velocity = 0.0;                     // Will be set from meteo data
         output.stability_param = 0.0;                       // Will be calculated if needed
 
+        // Extract soil properties from SNOWPACK ground interface elements
+        // SNOWPACK has full soil physics - this is why we use it instead of NoahMP
+        // CRYOWRF: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
+
+        // Initialize with safe defaults
+        output.soil_temperature = 273.15;
+        output.soil_moisture_volumetric = 30.0;
+        output.soil_moisture_liquid = 0.30;
+        output.soil_moisture_avail = 0.6;
+        output.soil_moisture_total = 80.0;
+        output.soil_density = 1600.0;
+        output.soil_conductivity = 0.25;
+        output.soil_heat_capacity = 1200.0;
+
+        // Extract real soil data from SNOWPACK elements
+        // SNOWPACK soil elements are at the bottom of the Edata vector
+        try {
+            size_t n_elements = station.getNumberOfElements();
+            if (n_elements > 0) {
+                // Find soil elements (typically the last elements)
+                // SoilNode indicates the top soil element index
+                size_t soil_node = static_cast<size_t>(station.SoilNode);
+
+                if (soil_node > 0 && soil_node <= n_elements) {
+                    const ElementData& soil_elem = station.Edata[soil_node - 1];  // C++ indexing
+
+                    // Extract soil properties from SNOWPACK element
+                    // REF: SNOWPACK ElementData structure (same as layer extraction)
+                    output.soil_temperature = soil_elem.Te;               // Element temperature [K]
+
+                    // Extract volumetric contents from theta array
+                    // ice = theta[0], water = theta[1], air = theta[2]
+                    double ice_fraction = soil_elem.theta[0];             // Ice volume fraction
+                    double water_fraction = soil_elem.theta[1];           // Water volume fraction
+                    double air_fraction = soil_elem.theta[2];             // Air volume fraction
+                    double soil_fraction = 1.0 - ice_fraction - water_fraction - air_fraction;  // Remaining is soil
+
+                    // Calculate soil moisture properties
+                    output.soil_moisture_volumetric = water_fraction * 100.0;  // Convert to percentage
+                    output.soil_moisture_liquid = water_fraction;              // Liquid water fraction
+                    output.soil_moisture_total = (water_fraction + ice_fraction) * 1000.0;  // mm in 1m depth
+
+                    // Calculate moisture availability (based on liquid water content)
+                    output.soil_moisture_avail = std::min(1.0, water_fraction / 0.3);  // 30% field capacity
+
+                    // Extract density from element properties
+                    // ElementData has basic properties, calculate soil density from composition
+                    double rho_ice = 917.0;    // kg/m³ - ice density
+                    double rho_water = 1000.0; // kg/m³ - water density
+                    double rho_air = 1.2;      // kg/m³ - air density
+                    double rho_soil = 2650.0;  // kg/m³ - mineral soil density
+
+                    // Calculate bulk density from composition
+                    output.soil_density = (ice_fraction * rho_ice +
+                                         water_fraction * rho_water +
+                                         air_fraction * rho_air +
+                                         soil_fraction * rho_soil);
+
+                    // Thermal conductivity (mixture model)
+                    double k_ice = 2.2;      // W/m/K - ice conductivity
+                    double k_water = 0.6;    // W/m/K - water conductivity
+                    double k_soil = 0.25;    // W/m/K - mineral soil conductivity
+                    output.soil_conductivity = (ice_fraction * k_ice +
+                                              water_fraction * k_water +
+                                              soil_fraction * k_soil);
+
+                    // Heat capacity (mixture model)
+                    double c_ice = 2100.0;   // J/kg/K - ice heat capacity
+                    double c_water = 4186.0; // J/kg/K - water heat capacity
+                    double c_soil = 800.0;   // J/kg/K - mineral soil heat capacity
+                    output.soil_heat_capacity = (ice_fraction * c_ice +
+                                               water_fraction * c_water +
+                                               soil_fraction * c_soil);
+
+                    // Calculate moisture availability (based on liquid water content)
+                    output.soil_moisture_avail = std::min(1.0, water_fraction / 0.3);  // 30% field capacity
+
+                    // Total soil water already calculated above as moisture_total
+
+                    printf("SNOWPACK-SOIL: Extracted from soil node %zu: T=%.1fK, moisture=%.1f%%, density=%.0f kg/m³\n",
+                           soil_node, output.soil_temperature, output.soil_moisture_volumetric, output.soil_density);
+                }
+            }
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-WARNING: Could not extract soil properties: %s\n", e.what());
+            // Keep default values if extraction fails
+        }
+
+        // Sanity checks for soil properties
+        output.soil_moisture_volumetric = std::max(0.0, std::min(100.0, output.soil_moisture_volumetric));
+        output.soil_moisture_liquid = std::max(0.0, std::min(1.0, output.soil_moisture_liquid));
+        output.soil_moisture_avail = std::max(0.0, std::min(1.0, output.soil_moisture_avail));
+        output.soil_moisture_total = std::max(0.0, output.soil_moisture_total);
+        output.soil_temperature = std::max(150.0, std::min(350.0, output.soil_temperature)); // Reasonable temp range
+
         // Consistency check
         if (output.snow_depth > 0.001 && output.snow_swe <= 0.0) {
             // Use fallback density

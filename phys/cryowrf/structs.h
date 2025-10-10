@@ -29,6 +29,17 @@ struct SnowpackOutput {
     double snow_coverage;
     double friction_velocity;
     double stability_param;
+
+    // Soil properties from SNOWPACK ground interface
+    // CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 updates soil moisture
+    double soil_moisture_volumetric;  // phiSoil from SNOWPACK [%]
+    double soil_temperature;          // ts0 from SNOWPACK [K]
+    double soil_density;              // SoilRho from SNOWPACK [kg/m³]
+    double soil_conductivity;         // SoilK from SNOWPACK
+    double soil_heat_capacity;        // SoilC from SNOWPACK
+    double soil_moisture_liquid;      // Calculated liquid fraction
+    double soil_moisture_avail;       // Calculated availability [0-1]
+    double soil_moisture_total;       // Calculated total water [mm]
 };
 
 struct SnowpackLayerData {
@@ -61,5 +72,6 @@ struct BudgetData {
     double energy_rain;
     double energy_total;
 };
+
 
 #endif // SNOWPACK_BRIDGE_STRUCTS_H
