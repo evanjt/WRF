@@ -4,12 +4,12 @@
 # Based on essential meteorological and snow physics variables only
 
 # Dimension for snow layers (simplified from CRYOWRF - no blowing snow layers)
-rconfig   integer no_snpack_lay_to_sav    namelist,physics      1            50      irh    "no_snpack_lay_to_sav"          ""      "" 
+rconfig   integer no_snpack_lay_to_sav    namelist,physics      1            50      irh    "no_snpack_lay_to_sav"          ""      ""
 dimspec    snpacky 2     namelist=no_snpack_lay_to_sav     z     snowpack_layers
 
 # Core SNOWPACK surface fluxes - replaces complex CRYOWRF outputs
 state    real   SNOWPACK_TSK      ij     misc        1         -     rh       "SNOWPACK_TSK"      "SNOWPACK SURFACE TEMPERATURE"             "K"
-state    real   SNOWPACK_HFX      ij     misc        1         -     rh       "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"  
+state    real   SNOWPACK_HFX      ij     misc        1         -     rh       "SNOWPACK_HFX"      "SNOWPACK SENSIBLE HEAT FLUX"              "W m-2"
 state    real   SNOWPACK_QFX      ij     misc        1         -     rh       "SNOWPACK_QFX"      "SNOWPACK LATENT HEAT FLUX"                "kg m-2 s-1"
 state    real   SNOWPACK_LH       ij     misc        1         -     rh       "SNOWPACK_LH"       "SNOWPACK LATENT HEAT FLUX"                "W m-2"
 state    real   SNOWPACK_ALBEDO   ij     misc        1         -     rh       "SNOWPACK_ALBEDO"   "SNOWPACK SURFACE ALBEDO"                  "1"
@@ -33,7 +33,7 @@ state    real   SNOWPACK_SOIL_TOTAL      ij     misc        1         -     rh  
 state    real   SNOWPACK_ACSNOM   ij     misc        1         -     "SNOWPACK_ACSNOM"   "ACCUMULATED SNOW MELT"                    "mm"
 state    real   SNOWPACK_ACSNOW   ij     misc        1         -     "SNOWPACK_ACSNOW"   "ACCUMULATED SNOWFALL"                     "mm"
 
-# Time series output variables for essential SNOWPACK diagnostics  
+# Time series output variables for essential SNOWPACK diagnostics
 state    real   SNOWPACK_TSK_TS   ijkft   misc        1         -     "SNOWPACK_TSK_TS"   "SNOWPACK SURFACE TEMP TIMESERIES"         "K"
 state    real   SNOWPACK_HFX_TS   ijkft   misc        1         -     "SNOWPACK_HFX_TS"   "SNOWPACK SENSIBLE FLUX TIMESERIES"        "W m-2"
 state    real   SNOWPACK_QFX_TS   ijkft   misc        1         -     "SNOWPACK_QFX_TS"   "SNOWPACK LATENT FLUX TIMESERIES"          "kg m-2 s-1"
@@ -42,7 +42,6 @@ state    real   SNOWPACK_SNOW_TS  ijkft   misc        1         -     "SNOWPACK_
 state    real   SNOWPACK_SNOWH_TS ijkft   misc        1         -     "SNOWPACK_SNOWH_TS" "SNOWPACK DEPTH TIMESERIES"                "m"
 
 # Namelist parameters for SNOWPACK configuration (CRYOWRF-compatible, without blowing snow)
-rconfig   integer sf_snowpack_physics    namelist,physics   1            0       -      "sf_snowpack_physics"    "SNOWPACK LAND SURFACE OPTION"
 rconfig   character snowpack_config_file namelist,physics   max_domains  "io.ini"  -    "snowpack_config_file"   "SNOWPACK CONFIGURATION FILE PATH"
 rconfig   logical sn_start_from_file      namelist,physics   max_domains  .false. irh    "sn_start_from_file"     "start SNOWPACK from .sno files"          ""
 rconfig   real    snpack_dt               namelist,physics   max_domains  900     irh    "snpack_dt"              "SNOWPACK timestep"                       "s"
@@ -78,6 +77,3 @@ state   real    e_budg_latent   ij     misc         1         -     i012rhd    "
 state   real    e_budg_ground_flux ij  misc         1         -     i012rhd    "E_BUDG_GFLUX"    "Energy Budget Ground Flux" "W m-2"
 state   real    e_budg_rain     ij     misc         1         -     i012rhd    "E_BUDG_RAIN"     "Energy Budget Rain" "W m-2"
 state   real    e_budg_total    ij     misc         1         -     i012rhd    "E_BUDG_dU"       "Energy Budget Total Change" "W m-2"
-
-# Package declaration
-package   snowpack_lsm      sf_snowpack_physics==1               -             state:snowpack_tsk,snowpack_hfx,snowpack_qfx,snowpack_lh,snowpack_albedo,snowpack_snowc,snowpack_snow,snowpack_snowh,snowpack_emiss,snowpack_acsnom,snowpack_acsnow,snowpack_soil_moisture,snowpack_soil_temp,snowpack_soil_density,snowpack_soil_conduct,snowpack_soil_heatcap,snowpack_soil_liquid,snowpack_soil_avail,snowpack_soil_total,sn_T,sn_thick,sn_volI,sn_volW,sn_volV,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers,m_budg_precip,m_budg_sublim,m_budg_melt,m_budg_swe,m_budg_refreeze,e_budg_lw_in,e_budg_lw_out,e_budg_sw_in,e_budg_sw_out,e_budg_sensible,e_budg_latent,e_budg_ground_flux,e_budg_rain,e_budg_total

@@ -16,6 +16,7 @@ WORKDIR ${BASE_DIR}
 # Copy only the modified phys directory for fast rebuild
 COPY --chown=wrfuser:wrfuser phys/ ${BASE_DIR}/WRF/phys/
 COPY --chown=wrfuser:wrfuser main/ ${BASE_DIR}/WRF/main/
+COPY --chown=wrfuser:wrfuser Registry/ ${BASE_DIR}/WRF/Registry/
 
 
 WORKDIR ${BASE_DIR}/WRF

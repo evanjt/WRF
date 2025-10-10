@@ -167,7 +167,6 @@ MODULES = \
 	cryowrf/bridge.o \
 	cryowrf/objects.o \
 	cryowrf/config.o \
-	cryowrf/utils.o \
 	cryowrf/bindings.o \
 	module_cryowrf_types.o \
 	module_sf_cryowrfdrv.o \
@@ -336,8 +335,6 @@ include ../main/depend.common
 cryowrf/config.o: cryowrf/config.cpp cryowrf/config.h
 	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
-cryowrf/utils.o: cryowrf/utils.cpp cryowrf/bridge.h
-	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
 cryowrf/bindings.o: cryowrf/bindings.cpp cryowrf/bridge.h
 	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<

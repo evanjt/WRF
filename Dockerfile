@@ -8,7 +8,7 @@ LABEL description="WRF atmospheric model build environment"
 ENV DEBIAN_FRONTEND=noninteractive \
     WRF_VERSION=v4.7+ \
     BASE_DIR=/home/wrfuser/wrf-build \
-    WRF_CONFIGURE_OPTION=34 \
+    WRF_CONFIGURE_OPTION=35 \
     WPS_CONFIGURE_OPTION=3
 
 # Library paths configuration
