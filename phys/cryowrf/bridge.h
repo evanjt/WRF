@@ -12,24 +12,13 @@
 #include "structs.h"
 #include "utils.h"
 #include "config.h"
+#include "constants.h"
 #include "meteoio/meteoio/MeteoIO.h"
 #include "snowpack/snowpack/DataClasses.h"
 #include "snowpack/snowpack/SnowpackConfig.h"
 #include "snowpack/snowpack/snowpackCore/Snowpack.h"
 #include "snowpack/snowpack/plugins/SnowpackIO.h"
 
-namespace SnowpackConstants {
-  constexpr double T_CRAZY_MAX_KELVIN = 400.0;  //  127°C - configurable via T_CRAZY_MAX
-  constexpr double T_CRAZY_MIN_KELVIN = 100.0;  // -173°C - configurable via T_CRAZY_MIN
-
-  // Physical thresholds - can be overridden by configuration
-  constexpr double PRECIP_PHASE_THRESHOLD_K = 273.65;  // 0.5°C threshold for snow/rain
-  constexpr double BOTTOM_TEMP_OFFSET_K = 5.0;         // Offset below air temp for ground temp
-  constexpr double SNOW_DENSITY_FALLBACK = 100.0;      // kg/m³ fallback density
-
-  // Default station metadata
-  const std::string STATION_ID_PREFIX = "WRF_GRID";  // Station ID prefix for SNOWPACK
-}
 struct SnowpackBridgeObjects {
     SnowStation* station;
     Snowpack* instance;

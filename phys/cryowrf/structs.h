@@ -20,6 +20,8 @@ struct MeteoInput {
 };
 
 struct SnowpackOutput {
+    static constexpr int MAX_SOIL_LAYERS = 4;
+
     double snow_swe = 0.0;
     double snow_depth = 0.0;
     double surface_temp = 0.0;
@@ -36,7 +38,7 @@ struct SnowpackOutput {
 
     // Soil properties from SNOWPACK ground interface
     // CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 updates soil moisture
-    double soil_moisture_volumetric = 0.0;  // phiSoil from SNOWPACK [%]
+    double soil_moisture_volumetric = 0.0;  // phiSoil from SNOWPACK [m³/m³]
     double soil_temperature = 273.15;       // ts0 from SNOWPACK [K]
     double soil_density = 0.0;              // SoilRho from SNOWPACK [kg/m³]
     double soil_conductivity = 0.0;         // SoilK from SNOWPACK
@@ -44,6 +46,11 @@ struct SnowpackOutput {
     double soil_moisture_liquid = 0.0;      // Calculated liquid fraction
     double soil_moisture_avail = 0.0;       // Calculated availability [0-1]
     double soil_moisture_total = 0.0;       // Calculated total water [mm]
+
+    int soil_layer_count = 0;
+    double soil_temp_layers[MAX_SOIL_LAYERS] = {0.0};
+    double soil_moisture_vol_layers[MAX_SOIL_LAYERS] = {0.0};
+    double soil_moisture_liq_layers[MAX_SOIL_LAYERS] = {0.0};
 };
 
 struct SnowpackLayerData {

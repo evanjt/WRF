@@ -156,7 +156,8 @@ void ensure_station_initialized(SnowStation* station,
         mio::Coords position;
         position.setLatLon(input.wrf_lat, input.wrf_lon, input.height);
 
-        std::string stationID = SnowpackConstants::STATION_ID_PREFIX + "_" +
+        const auto& constants = SnowpackConstants::get();
+        std::string stationID = constants.station_id_prefix + "_" +
                                std::to_string(input.i_grid) + "_" + std::to_string(input.j_grid);
         std::string stationName = "WRF Grid Point " + std::to_string(input.i_grid) + "," + std::to_string(input.j_grid);
 

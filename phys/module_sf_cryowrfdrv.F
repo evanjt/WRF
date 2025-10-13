@@ -4,14 +4,40 @@
 ! WRF interface driver for SNOWPACK physics integration
 !
 MODULE module_sf_snowpackdrv
-    USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR
+    USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR, C_DOUBLE
 #ifdef _OPENMP
     USE omp_lib
 #endif
 
+    INTERFACE
+        FUNCTION snowpack_get_measurement_height_floor() BIND(C, name='snowpack_get_measurement_height_floor')
+            USE ISO_C_BINDING
+            REAL(C_DOUBLE) :: snowpack_get_measurement_height_floor
+        END FUNCTION
+        FUNCTION snowpack_get_measurement_height_scale() BIND(C, name='snowpack_get_measurement_height_scale')
+            USE ISO_C_BINDING
+            REAL(C_DOUBLE) :: snowpack_get_measurement_height_scale
+        END FUNCTION
+        FUNCTION snowpack_get_snow_roughness_length() BIND(C, name='snowpack_get_snow_roughness_length')
+            USE ISO_C_BINDING
+            REAL(C_DOUBLE) :: snowpack_get_snow_roughness_length
+        END FUNCTION
+        FUNCTION snowpack_get_snow_emissivity() BIND(C, name='snowpack_get_snow_emissivity')
+            USE ISO_C_BINDING
+            REAL(C_DOUBLE) :: snowpack_get_snow_emissivity
+        END FUNCTION
+        FUNCTION snowpack_get_soil_emissivity() BIND(C, name='snowpack_get_soil_emissivity')
+            USE ISO_C_BINDING
+            REAL(C_DOUBLE) :: snowpack_get_soil_emissivity
+        END FUNCTION
+    END INTERFACE
+
     ! Module-level configuration management
     LOGICAL, SAVE :: config_initialized = .false.
     LOGICAL, SAVE :: config_logged = .false.
+    LOGICAL, SAVE :: coupling_enabled = .TRUE.
+    LOGICAL, SAVE :: coupling_disabled_logged = .FALSE.
+    LOGICAL, SAVE :: multi_layer_soil_enabled = .FALSE.
     CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
 
     ! Per-grid accumulation for Meteo averaging / throttling
@@ -62,6 +88,8 @@ SUBROUTINE initialize_snowpack_module_config()
     INTEGER :: domain_id
     
     LOGICAL :: already_configured
+    LOGICAL :: enable_coupling_local
+    LOGICAL :: multi_layer_local
 
     already_configured = .FALSE.
 
@@ -80,6 +108,12 @@ SUBROUTINE initialize_snowpack_module_config()
             config_file_path = './io.ini'
         ENDIF
 
+        CALL nl_get_snpack_enable_coupling(domain_id, enable_coupling_local)
+        coupling_enabled = enable_coupling_local
+
+        CALL nl_get_snpack_multi_layer_soil(domain_id, multi_layer_local)
+        multi_layer_soil_enabled = multi_layer_local
+
         ! Initialize SNOWPACK configuration with the file
         CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
 
@@ -90,6 +124,12 @@ SUBROUTINE initialize_snowpack_module_config()
 
         ! Diagnostic message
         CALL wrf_message('*** SNOWPACK LSM: Initialized with config file: ' // TRIM(config_file_path) // ' ***')
+        IF (.NOT. coupling_enabled) THEN
+            CALL wrf_message('*** SNOWPACK LSM: Coupling disabled via snpack_enable_coupling ***')
+        END IF
+        IF (multi_layer_soil_enabled) THEN
+            CALL wrf_message('*** SNOWPACK LSM: Multi-layer soil export enabled ***')
+        END IF
     END IF
 !$OMP END CRITICAL(snowpack_config_init)
 
@@ -108,8 +148,9 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
                SN_T,SN_THICK,SN_VOLI,SN_VOLW,SN_VOLV,SN_RG,SN_RB,SN_DD,SN_SP,SN_NLAYERS, & ! OPTIONAL CRYOWRF layer arrays
-               M_BUDG_PRECIP,M_BUDG_SUBLIM,M_BUDG_MELT,               & ! OPTIONAL CRYOWRF mass budget
-               E_BUDG_LW_IN,E_BUDG_SENSIBLE,E_BUDG_LATENT,            & ! OPTIONAL CRYOWRF energy budget
+               M_BUDG_PRECIP,M_BUDG_SUBLIM,M_BUDG_MELT,M_BUDG_SWE,M_BUDG_REFREEZE, & ! OPTIONAL CRYOWRF mass budget
+               E_BUDG_LW_IN,E_BUDG_LW_OUT,E_BUDG_SW_IN,E_BUDG_SW_OUT, & ! OPTIONAL CRYOWRF energy budget
+               E_BUDG_SENSIBLE,E_BUDG_LATENT,E_BUDG_GFLUX,E_BUDG_RAINE,E_BUDG_DU,  &
                ids,ide,  jds,jde,  kds,kde,                    &
                ims,ime,  jms,jme,  kms,kme,                    &
                its,ite,  jts,jte,  kts,kte     )
@@ -185,14 +226,22 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     INTEGER, DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_NLAYERS  ! number of layers
 
 ! CRYOWRF mass budget arrays (OPTIONAL - matching CRYOWRF behavior)
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_PRECIP   ! mass budget precip [kg m-2]
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_SUBLIM   ! mass budget sublim [kg m-2]
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_MELT     ! mass budget melt [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_PRECIP    ! mass budget precip [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_SUBLIM    ! mass budget sublim [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_MELT      ! mass budget melt [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_SWE       ! mass budget SWE change [kg m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  M_BUDG_REFREEZE  ! mass budget refreeze [kg m-2]
 
 ! CRYOWRF energy budget arrays (OPTIONAL - matching CRYOWRF behavior)
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LW_IN    ! energy budget LW in [W m-2]
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_SENSIBLE ! energy budget sensible [W m-2]
-    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LATENT   ! energy budget latent [W m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LW_IN     ! energy budget LW in  [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LW_OUT    ! energy budget LW out [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_SW_IN     ! energy budget SW in  [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_SW_OUT    ! energy budget SW out [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_SENSIBLE  ! energy budget sensible [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_LATENT    ! energy budget latent   [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_GFLUX     ! energy budget ground flux [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_RAINE     ! energy budget rain       [J m-2]
+    REAL,    DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  E_BUDG_DU        ! internal energy change   [J m-2]
 
     INTEGER, INTENT(IN   )   ::     ids,ide, jds,jde, kds,kde
     INTEGER, INTENT(IN   )   ::     ims,ime, jms,jme, kms,kme
@@ -200,6 +249,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 
 ! Local Variables
     INTEGER :: I, J, K
+    INTEGER :: layer_count_local
     TYPE(SnowpackInterface) :: interface_data
     
     ! Time initialization variables (CRYOWRF pattern)
@@ -224,6 +274,13 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 
     ! Initialize SNOWPACK configuration on first call
     CALL initialize_snowpack_module_config()
+    IF (.NOT. coupling_enabled) THEN
+        IF (.NOT. coupling_disabled_logged .AND. itimestep == 1) THEN
+            CALL wrf_message('SNOWPACK LSM: Coupling disabled via snpack_enable_coupling; skipping SNOWPACK physics')
+            coupling_disabled_logged = .TRUE.
+        END IF
+        RETURN
+    END IF
     
     ! Get domain ID from grid dimensions (WRF pattern)
     IF (ids == 1) THEN
@@ -372,10 +429,11 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         rain_total = acc_rain(I,J)
 
         dt_effective = dt * REAL(acc_samples(I,J))   ! aggregate WRF steps into the Snowpack physics step
-        ! Original CRYOWRF (src/wrf/phys/module_sf_snowpacklsm.F:527) sampled meteo at 0.5*DZ8W.  In testing,
-        ! that stronger drag raised PSFC versus baseline commit 7c8bbf08, so we temporarily restore the
-        ! earlier WRF behavior (use full DZ8W) until we retune MYNN with Snowpack-derived friction velocity.
-        met_height   = MAX(1.0, DZ8W(I,1,J))
+        ! CRYOWRF (src/wrf/phys/module_sf_snowpacklsm.F:527) samples meteo at half the first layer thickness.
+        ! Reinstate the 0.5*DZ8W scaling so Snowpack sees the same effective measurement height as the
+        ! reference implementation; keep the 1 m floor to avoid degeneracy over shallow domains.
+        met_height = MAX(REAL(snowpack_get_measurement_height_floor(), KIND=KIND(met_height)), &
+                          REAL(snowpack_get_measurement_height_scale(), KIND=KIND(met_height)) * DZ8W(I,1,J))
 
         ! Reset accumulators for next cycle
         acc_ta(I,J) = 0.0
@@ -441,9 +499,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         ! CRYOWRF: module_sf_snowpacklsm.F:742-750
         IF (SNOWH(I,J) > 0.0) THEN
             ! Snow-covered surface: use snow roughness length
-            ! TODO: Add mode selection (antarctica vs land) for different roughness values
-            Z0(I,J) = 0.002   ! Snow roughness length [m]
-            ZNT(I,J) = 0.002   ! Thermal roughness equals momentum roughness
+            Z0(I,J) = REAL(snowpack_get_snow_roughness_length(), KIND=KIND(Z0))
+            ZNT(I,J) = Z0(I,J)
         ELSE
             ! Snow-free surface: use underlying surface roughness (preserve WRF value)
             ! Z0 and ZNT already contain WRF-calculated values for bare ground
@@ -457,17 +514,21 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         END IF
         
         ! Extract CRYOWRF budget arrays if present (matching CRYOWRF behavior)
-        IF (PRESENT(M_BUDG_PRECIP)) THEN
-            M_BUDG_PRECIP(I,J) = interface_data%budgets%mass_precip     ! Precipitation mass [kg/m²]
-            M_BUDG_SUBLIM(I,J) = interface_data%budgets%mass_sublim    ! Sublimation mass [kg/m²]
-            M_BUDG_MELT(I,J) = interface_data%budgets%mass_melt        ! Melt mass [kg/m²]
-        END IF
+        IF (PRESENT(M_BUDG_PRECIP))    M_BUDG_PRECIP(I,J)   = M_BUDG_PRECIP(I,J)   + interface_data%budgets%mass_precip
+        IF (PRESENT(M_BUDG_SUBLIM))    M_BUDG_SUBLIM(I,J)   = M_BUDG_SUBLIM(I,J)   + interface_data%budgets%mass_sublim
+        IF (PRESENT(M_BUDG_MELT))      M_BUDG_MELT(I,J)     = M_BUDG_MELT(I,J)     + interface_data%budgets%mass_melt
+        IF (PRESENT(M_BUDG_SWE))       M_BUDG_SWE(I,J)      = M_BUDG_SWE(I,J)      + interface_data%budgets%mass_swe
+        IF (PRESENT(M_BUDG_REFREEZE))  M_BUDG_REFREEZE(I,J) = M_BUDG_REFREEZE(I,J) + interface_data%budgets%mass_refreeze
 
-        IF (PRESENT(E_BUDG_LW_IN)) THEN
-            E_BUDG_LW_IN(I,J) = interface_data%budgets%energy_lw_in     ! Longwave radiation in [J/m²]
-            E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible ! Sensible heat [J/m²]
-            E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent    ! Latent heat [J/m²]
-        END IF
+        IF (PRESENT(E_BUDG_LW_IN))     E_BUDG_LW_IN(I,J)    = E_BUDG_LW_IN(I,J)    + interface_data%budgets%energy_lw_in
+        IF (PRESENT(E_BUDG_LW_OUT))    E_BUDG_LW_OUT(I,J)   = E_BUDG_LW_OUT(I,J)   + interface_data%budgets%energy_lw_out
+        IF (PRESENT(E_BUDG_SW_IN))     E_BUDG_SW_IN(I,J)    = E_BUDG_SW_IN(I,J)    + interface_data%budgets%energy_sw_in
+        IF (PRESENT(E_BUDG_SW_OUT))    E_BUDG_SW_OUT(I,J)   = E_BUDG_SW_OUT(I,J)   + interface_data%budgets%energy_sw_out
+        IF (PRESENT(E_BUDG_SENSIBLE))  E_BUDG_SENSIBLE(I,J) = E_BUDG_SENSIBLE(I,J) + interface_data%budgets%energy_sensible
+        IF (PRESENT(E_BUDG_LATENT))    E_BUDG_LATENT(I,J)   = E_BUDG_LATENT(I,J)   + interface_data%budgets%energy_latent
+        IF (PRESENT(E_BUDG_GFLUX))     E_BUDG_GFLUX(I,J)    = E_BUDG_GFLUX(I,J)    + interface_data%budgets%energy_ground
+        IF (PRESENT(E_BUDG_RAINE))     E_BUDG_RAINE(I,J)    = E_BUDG_RAINE(I,J)    + interface_data%budgets%energy_rain
+        IF (PRESENT(E_BUDG_DU))        E_BUDG_DU(I,J)       = E_BUDG_DU(I,J)       + interface_data%budgets%energy_total
 
         !$OMP END CRITICAL(snowpack_bridge)
 
@@ -495,16 +556,41 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         ! Set emissivity based on surface conditions following CRYOWRF approach
         ! CRYOWRF: module_sf_snowpacklsm.F:772 uses 0.98 for snow/soil
         IF (SNOWH(I,J) > 0.0) THEN
-            EMISS(I,J) = 0.98  ! Snow emissivity
+            EMISS(I,J) = REAL(snowpack_get_snow_emissivity(), KIND=KIND(EMISS))
         ELSE
-            EMISS(I,J) = 0.96  ! Bare soil emissivity (typical value)
+            EMISS(I,J) = REAL(snowpack_get_soil_emissivity(), KIND=KIND(EMISS))
         END IF
 
         ! Set soil properties from SNOWPACK ground interface
         ! CRYOWRF SOURCE: Soil layer initialization from CRYOWRF ground interface module
-        SMOIS(I,1,J) = interface_data%soil%moisture_volumetric  ! Volumetric soil moisture from SNOWPACK
-        SH2O(I,1,J) = interface_data%soil%moisture_liquid      ! Liquid soil moisture from SNOWPACK
-        TSLB(I,1,J) = interface_data%soil%temperature         ! Soil temperature from SNOWPACK
+        IF (multi_layer_soil_enabled) THEN
+            layer_count_local = MIN(nsoil, interface_data%soil%layer_count)
+
+            IF (layer_count_local > 0) THEN
+                DO K = 1, layer_count_local
+                    SMOIS(I,K,J) = interface_data%soil%moisture_vol_layers(K)
+                    SH2O(I,K,J)  = interface_data%soil%moisture_liq_layers(K)
+                    TSLB(I,K,J)  = interface_data%soil%temperature_layers(K)
+                END DO
+                DO K = layer_count_local + 1, nsoil
+                    SMOIS(I,K,J) = SMOIS(I,layer_count_local,J)
+                    SH2O(I,K,J)  = SH2O(I,layer_count_local,J)
+                    TSLB(I,K,J)  = TSLB(I,layer_count_local,J)
+                END DO
+            ELSE
+                DO K = 1, nsoil
+                    SMOIS(I,K,J) = interface_data%soil%moisture_volumetric
+                    SH2O(I,K,J)  = interface_data%soil%moisture_liquid
+                    TSLB(I,K,J)  = interface_data%soil%temperature
+                END DO
+            END IF
+        ELSE
+            DO K = 1, nsoil
+                SMOIS(I,K,J) = interface_data%soil%moisture_volumetric
+                SH2O(I,K,J)  = interface_data%soil%moisture_liquid
+                TSLB(I,K,J)  = interface_data%soil%temperature
+            END DO
+        END IF
         
     END DO
     END DO

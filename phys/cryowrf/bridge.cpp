@@ -36,8 +36,9 @@ void prepare_meteo_data(const MeteoInput& input,
                         const SnowpackConfig* config) {
 
     // Temperature sanity check
-    const double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN,
-                               std::min(input.temp_air, SnowpackConstants::T_CRAZY_MAX_KELVIN));
+    const auto& constants = SnowpackConstants::get();
+    const double safe_temp = std::max(constants.t_crazy_min,
+                               std::min(input.temp_air, constants.t_crazy_max));
     const double safe_rh = std::max(0.01, std::min(1.0, input.humidity));
     const double safe_wind = std::max(0.0, input.wind_speed);
 
@@ -55,26 +56,26 @@ void prepare_meteo_data(const MeteoInput& input,
     Mdata.iswr = std::max(0.0, input.shortwave_in);             // Incoming shortwave [W/m²]
     Mdata.lw_net = input.longwave_in;                           // Net longwave surrogate (no ilwr_v in vendored Snowpack)
     Mdata.psum = std::max(0.0, input.precipitation);            // Precipitation [mm]
-    Mdata.psum_ph = (safe_temp < SnowpackConstants::PRECIP_PHASE_THRESHOLD_K) ? 0.0 : 1.0;  // CRYOWRF src/coupler/main_coupler/Coupler.cpp:921
+    Mdata.psum_ph = (safe_temp < constants.precip_phase_threshold) ? 0.0 : 1.0;  // CRYOWRF src/coupler/main_coupler/Coupler.cpp:921
     Mdata.ea = std::max(0.6, std::min(1.0, 0.7 + 5.95e-5 * input.pressure * std::exp(1500.0 * safe_rh / safe_temp)));  // Coupler atmospheric emissivity heuristic
     Mdata.tss = mio::IOUtils::nodata;                           // Let SNOWPACK solve for surface temperature
-    Mdata.ts0 = 400.0;                                          // CRYOWRF src/coupler/main_coupler/Coupler.cpp:909 (TSG=400K)
+    Mdata.ts0 = constants.surface_temp_guess;                   // CRYOWRF src/coupler/main_coupler/Coupler.cpp:909 (TSG=400K)
     Mdata.hs = std::max(0.0, current_snow_depth);               // Current snow depth [m]
 
     // Set roughness length and friction velocity for wind pumping calculations
     // Without these, wind pumping produces NaN thermal conductivity
-    double roughness_length = 0.002;  // Default fallback value
+    double roughness_length = constants.snow_roughness_length;  // Default fallback value
 
     if (config) {
         config->getValue("ROUGHNESS_LENGTH", "Snowpack", roughness_length, mio::IOUtils::nothrow);
         if (roughness_length < 0.0) {
-            roughness_length = 0.002;  // Default if not in config
+            roughness_length = constants.snow_roughness_length;  // Default if not in config
         }
     }
 
     // Adapt roughness based on snow presence (CRYOWRF pattern from Coupler.cpp line 267)
-    const double snow_depth_threshold = 0.03;  // 3cm snow depth threshold
-    const double rough_len = (current_snow_depth > snow_depth_threshold) ? roughness_length : 0.01;  // Bare soil z0 ~0.01
+    const double snow_depth_threshold = constants.snow_depth_roughness_threshold;  // 3cm snow depth threshold
+    const double rough_len = (current_snow_depth > snow_depth_threshold) ? roughness_length : constants.bare_roughness_length;  // Bare soil z0 ~0.01
     Mdata.z0 = rough_len;
 
     // Compute friction velocity from wind speed using log profile (CRYOWRF pattern from Coupler.cpp)
@@ -113,6 +114,8 @@ void extract_surface_outputs(const SnowStation& station,
                              SnowpackOutput& output,
                              double temp_air_fallback) {
 
+    const auto& constants = SnowpackConstants::get();
+
     output.latent_flux_kg = 0.0;
     output.moisture_flux = 0.0;
     output.roughness_mom = std::max(1.0e-4, meteo.z0);
@@ -135,83 +138,110 @@ void extract_surface_outputs(const SnowStation& station,
         // CRYOWRF: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
 
         // Initialize with safe defaults
-        output.soil_temperature = 273.15;
-        output.soil_moisture_volumetric = 30.0;
-        output.soil_moisture_liquid = 0.30;
-        output.soil_moisture_avail = 0.6;
-        output.soil_moisture_total = 80.0;
-        output.soil_density = 1600.0;
-        output.soil_conductivity = 0.25;
-        output.soil_heat_capacity = 1200.0;
+        output.soil_temperature = constants.default_soil_temperature;
+        output.soil_moisture_volumetric = constants.default_soil_moisture_vol;
+        output.soil_moisture_liquid = constants.default_soil_moisture_liq;
+        output.soil_moisture_avail = constants.default_soil_moisture_avail;
+        output.soil_moisture_total = constants.default_soil_moisture_total;
+        output.soil_density = constants.default_soil_density;
+        output.soil_conductivity = constants.default_soil_conductivity;
+        output.soil_heat_capacity = constants.default_soil_heat_capacity;
 
         // Extract real soil data from SNOWPACK elements
         // SNOWPACK soil elements are at the bottom of the Edata vector
         try {
             size_t n_elements = station.getNumberOfElements();
+            output.soil_layer_count = 0;
+            for (int idx = 0; idx < SnowpackOutput::MAX_SOIL_LAYERS; ++idx) {
+                output.soil_temp_layers[idx] = output.soil_temperature;
+                output.soil_moisture_vol_layers[idx] = 0.0;
+                output.soil_moisture_liq_layers[idx] = 0.0;
+            }
+
+            double total_water_mm = 0.0;
+
             if (n_elements > 0) {
-                // Find soil elements (typically the last elements)
-                // SoilNode indicates the top soil element index
                 size_t soil_node = static_cast<size_t>(station.SoilNode);
 
                 if (soil_node > 0 && soil_node <= n_elements) {
-                    const ElementData& soil_elem = station.Edata[soil_node - 1];  // C++ indexing
+                    size_t layer_idx = 0;
+                    for (size_t elem_idx = soil_node - 1; elem_idx < n_elements && layer_idx < SnowpackOutput::MAX_SOIL_LAYERS; ++elem_idx) {
+                        const ElementData& soil_elem = station.Edata[elem_idx];
+                        const double ice_fraction = (soil_elem.theta.size() > 0) ? soil_elem.theta[0] : 0.0;
+                        const double water_fraction = (soil_elem.theta.size() > 1) ? soil_elem.theta[1] : 0.0;
+                        const double air_fraction = (soil_elem.theta.size() > 2) ? soil_elem.theta[2] : 0.0;
+                        const double soil_fraction = std::max(0.0, 1.0 - ice_fraction - water_fraction - air_fraction);
 
-                    // Extract soil properties from SNOWPACK element
-                    // REF: SNOWPACK ElementData structure (same as layer extraction)
-                    output.soil_temperature = soil_elem.Te;               // Element temperature [K]
+                        const double volumetric_liq = std::max(0.0, water_fraction);
+                        const double volumetric_total = std::max(0.0, std::min(1.0, water_fraction + ice_fraction));
 
-                    // Extract volumetric contents from theta array
-                    // ice = theta[0], water = theta[1], air = theta[2]
-                    double ice_fraction = soil_elem.theta[0];             // Ice volume fraction
-                    double water_fraction = soil_elem.theta[1];           // Water volume fraction
-                    double air_fraction = soil_elem.theta[2];             // Air volume fraction
-                    double soil_fraction = 1.0 - ice_fraction - water_fraction - air_fraction;  // Remaining is soil
+                        output.soil_temp_layers[layer_idx] = soil_elem.Te;
+                        output.soil_moisture_vol_layers[layer_idx] = volumetric_total;
+                        output.soil_moisture_liq_layers[layer_idx] = volumetric_liq;
 
-                    // Calculate soil moisture properties
-                    output.soil_moisture_volumetric = water_fraction * 100.0;  // Convert to percentage
-                    output.soil_moisture_liquid = water_fraction;              // Liquid water fraction
-                    output.soil_moisture_total = (water_fraction + ice_fraction) * 1000.0;  // mm in 1m depth
+                        const double layer_depth_m = soil_elem.L;
+                        if (layer_depth_m > 0.0) {
+                            total_water_mm += volumetric_total * layer_depth_m * 1000.0;
+                        }
 
-                    // Calculate moisture availability (based on liquid water content)
-                    output.soil_moisture_avail = std::min(1.0, water_fraction / 0.3);  // 30% field capacity
+                        if (layer_idx == 0) {
+                            const double availability_ref = (constants.default_soil_moisture_liq > 1.0e-6) ?
+                                constants.default_soil_moisture_liq : 0.3;
+                            output.soil_temperature = soil_elem.Te;
+                            output.soil_moisture_volumetric = volumetric_total;
+                            output.soil_moisture_liquid = volumetric_liq;
+                            output.soil_moisture_avail = std::min(1.0, (availability_ref > 0.0 && volumetric_liq > 0.0)
+                                ? volumetric_liq / availability_ref : 0.0);
 
-                    // Extract density from element properties
-                    // ElementData has basic properties, calculate soil density from composition
-                    double rho_ice = 917.0;    // kg/m³ - ice density
-                    double rho_water = 1000.0; // kg/m³ - water density
-                    double rho_air = 1.2;      // kg/m³ - air density
-                    double rho_soil = 2650.0;  // kg/m³ - mineral soil density
+                            const double rho_ice = 917.0;
+                            const double rho_water = 1000.0;
+                            const double rho_air = 1.2;
+                            const double rho_soil = 2650.0;
+                            output.soil_density = ice_fraction * rho_ice +
+                                                  water_fraction * rho_water +
+                                                  air_fraction * rho_air +
+                                                  soil_fraction * rho_soil;
 
-                    // Calculate bulk density from composition
-                    output.soil_density = (ice_fraction * rho_ice +
-                                         water_fraction * rho_water +
-                                         air_fraction * rho_air +
-                                         soil_fraction * rho_soil);
+                            const double k_ice = 2.2;
+                            const double k_water = 0.6;
+                            const double k_soil = 0.25;
+                            output.soil_conductivity = ice_fraction * k_ice +
+                                                       water_fraction * k_water +
+                                                       soil_fraction * k_soil;
 
-                    // Thermal conductivity (mixture model)
-                    double k_ice = 2.2;      // W/m/K - ice conductivity
-                    double k_water = 0.6;    // W/m/K - water conductivity
-                    double k_soil = 0.25;    // W/m/K - mineral soil conductivity
-                    output.soil_conductivity = (ice_fraction * k_ice +
-                                              water_fraction * k_water +
-                                              soil_fraction * k_soil);
+                            const double c_ice = 2100.0;
+                            const double c_water = 4186.0;
+                            const double c_soil = 800.0;
+                            output.soil_heat_capacity = ice_fraction * c_ice +
+                                                        water_fraction * c_water +
+                                                        soil_fraction * c_soil;
+                        }
 
-                    // Heat capacity (mixture model)
-                    double c_ice = 2100.0;   // J/kg/K - ice heat capacity
-                    double c_water = 4186.0; // J/kg/K - water heat capacity
-                    double c_soil = 800.0;   // J/kg/K - mineral soil heat capacity
-                    output.soil_heat_capacity = (ice_fraction * c_ice +
-                                               water_fraction * c_water +
-                                               soil_fraction * c_soil);
-
-                    // Calculate moisture availability (based on liquid water content)
-                    output.soil_moisture_avail = std::min(1.0, water_fraction / 0.3);  // 30% field capacity
-
-                    // Total soil water already calculated above as moisture_total
-
-                    printf("SNOWPACK-SOIL: Extracted from soil node %zu: T=%.1fK, moisture=%.1f%%, density=%.0f kg/m³\n",
-                           soil_node, output.soil_temperature, output.soil_moisture_volumetric, output.soil_density);
+                        ++layer_idx;
+                        output.soil_layer_count = static_cast<int>(layer_idx);
+                    }
                 }
+            }
+
+            output.soil_moisture_total = total_water_mm;
+
+            if (output.soil_layer_count == 0) {
+                output.soil_temperature = constants.default_soil_temperature;
+                output.soil_moisture_volumetric = constants.default_soil_moisture_vol;
+                output.soil_moisture_liquid = 0.0;
+                output.soil_moisture_avail = 0.0;
+                output.soil_moisture_total = 0.0;
+                output.soil_density = constants.default_soil_density;
+                output.soil_conductivity = constants.default_soil_conductivity;
+                output.soil_heat_capacity = constants.default_soil_heat_capacity;
+            }
+
+            if (output.soil_layer_count > 0) {
+                printf("SNOWPACK-SOIL: Extracted %d layers; top layer T=%.1fK, theta=%.1f%%, density=%.0f kg/m³\n",
+                       output.soil_layer_count,
+                       output.soil_temperature,
+                       output.soil_moisture_volumetric * 100.0,
+                       output.soil_density);
             }
         } catch (const std::exception& e) {
             printf("SNOWPACK-WARNING: Could not extract soil properties: %s\n", e.what());
@@ -219,7 +249,7 @@ void extract_surface_outputs(const SnowStation& station,
         }
 
         // Sanity checks for soil properties
-        output.soil_moisture_volumetric = std::max(0.0, std::min(100.0, output.soil_moisture_volumetric));
+        output.soil_moisture_volumetric = std::max(0.0, std::min(1.0, output.soil_moisture_volumetric));
         output.soil_moisture_liquid = std::max(0.0, std::min(1.0, output.soil_moisture_liquid));
         output.soil_moisture_avail = std::max(0.0, std::min(1.0, output.soil_moisture_avail));
         output.soil_moisture_total = std::max(0.0, output.soil_moisture_total);
@@ -237,7 +267,8 @@ void extract_surface_outputs(const SnowStation& station,
         // Consistency check
         if (output.snow_depth > 0.001 && output.snow_swe <= 0.0) {
             // Use fallback density
-            output.snow_swe = output.snow_depth * SnowpackConstants::SNOW_DENSITY_FALLBACK;
+            const auto& constants = SnowpackConstants::get();
+            output.snow_swe = output.snow_depth * constants.snow_density_fallback;
         }
 
     } catch (const std::exception& e) {
@@ -369,7 +400,7 @@ void SnowpackBridge::initialize_time(
 
 Snowpack* SnowpackBridge::get_or_create_snowpack_instance(int i_grid, int j_grid,
                                                         double wrf_lat, double wrf_lon, double wrf_alt) {
-    const std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" +
+    const std::string station_key = SnowpackConstants::get().station_id_prefix + "_1_" +
                                     std::to_string(i_grid) + "_" + std::to_string(j_grid);
 
     std::lock_guard<std::mutex> lock(station_mutex_);
@@ -387,7 +418,7 @@ Snowpack* SnowpackBridge::get_or_create_snowpack_instance(int i_grid, int j_grid
 SnowStation* SnowpackBridge::get_or_create_snowstation(
     int i_grid, int j_grid, int wrf_domain_id, double wrf_lat, double wrf_lon, double wrf_alt
 ) {
-    const std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_" +
+    const std::string station_key = SnowpackConstants::get().station_id_prefix + "_" +
                                     std::to_string(wrf_domain_id) + "_" +
                                     std::to_string(i_grid) + "_" + std::to_string(j_grid);
     bool use_canopy = false;
@@ -490,7 +521,7 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(
 }
 
 SnowStation* SnowpackBridge::get_existing_snowstation(int i_grid, int j_grid) {
-    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    std::string station_key = SnowpackConstants::get().station_id_prefix + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
     std::lock_guard<std::mutex> lock(station_mutex_);
     auto it = grid_snowstations_.find(station_key);
     if (it != grid_snowstations_.end()) {
@@ -505,7 +536,7 @@ void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
         return;
     }
 
-    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    std::string station_key = SnowpackConstants::get().station_id_prefix + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
     SnowStation* station_ptr = nullptr;
     {
         std::lock_guard<std::mutex> lock(station_mutex_);
@@ -639,7 +670,7 @@ void SnowpackBridge::execute_snowpack(
         SnowpackObjects::ensure_station_initialized(objects.station, input, *this);
 
         // 3. Advance simulation time following CRYOWRF per-station counter pattern
-        const std::string time_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" +
+        const std::string time_key = SnowpackConstants::get().station_id_prefix + "_1_" +
                                      std::to_string(input.i_grid) + "_" + std::to_string(input.j_grid);
         const double measured_height = std::max(1.0, input.height);
         bool height_changed = false;
@@ -868,6 +899,8 @@ void SnowpackBridge::initialize_config(const std::string& ini_path) {
             } else {
                 printf("SNOWPACK-DEBUG: ERROR: config_ pointer is NULL!\n");
             }
+
+            SnowpackConstants::load_from_config(config_.get());
 
             io_ = std::unique_ptr<SnowpackIO>(new SnowpackIO(*config_));
             printf("SNOWPACK-DEBUG: SnowpackIO created successfully\n");

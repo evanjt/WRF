@@ -165,6 +165,7 @@ MODULES = \
 	module_sf_pxlsm_data.o \
 	module_sf_ruclsm.o \
 	cryowrf/bridge.o \
+	cryowrf/constants.o \
 	cryowrf/objects.o \
 	cryowrf/config.o \
 	cryowrf/bindings.o \
@@ -316,6 +317,9 @@ submodules :
 
 # C++ object compilation for CRYOWRF interface
 cryowrf/bridge.o: cryowrf/bridge.cpp cryowrf/bridge.h
+	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
+
+cryowrf/constants.o: cryowrf/constants.cpp cryowrf/constants.h
 	$(CXX) -c $(CXXFLAGS) -fPIC -Icryowrf -Icryowrf/meteoio -Icryowrf/snowpack -o $@ $<
 
 cryowrf/objects.o: cryowrf/objects.cpp cryowrf/bridge.h

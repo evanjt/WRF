@@ -1,4 +1,5 @@
 #include "bridge.h"
+#include "constants.h"
 
 // C interface for Fortran binding
 extern "C" {

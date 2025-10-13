@@ -329,9 +329,12 @@ CONTAINS
      ! CRYOWRF layer arrays (OPTIONAL - for SNOWPACK physics)
      &          ,sn_t,sn_thick,sn_voli,sn_volw,sn_volv               & !CRYOWRF
      &          ,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers                  & !CRYOWRF
-     ! CRYOWRF budget arrays (OPTIONAL - for SNOWPACK physics)  
+     ! CRYOWRF budget arrays (OPTIONAL - for SNOWPACK physics)
      &          ,m_budg_precip,m_budg_sublim,m_budg_melt             & !CRYOWRF
-     &          ,e_budg_lw_in,e_budg_sensible,e_budg_latent          & !CRYOWRF
+     &          ,m_budg_swe,m_budg_refreeze                         & !CRYOWRF
+     &          ,e_budg_lw_in,e_budg_lw_out,e_budg_sw_in,e_budg_sw_out & !CRYOWRF
+     &          ,e_budg_sensible,e_budg_latent,e_budg_gflux          & !CRYOWRF
+     &          ,e_budg_raine,e_budg_du                             & !CRYOWRF
      &                                                             )
 
    USE module_state_description, ONLY : SFCLAYSCHEME              &
@@ -833,14 +836,22 @@ CONTAINS
    INTEGER, DIMENSION( ims:ime,     jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_NLAYERS  ! number of layers
 
 ! CRYOWRF mass budget arrays (OPTIONAL - for SNOWPACK physics)
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_PRECIP   ! mass budget precip [kg m-2]
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_SUBLIM   ! mass budget sublim [kg m-2]
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_MELT     ! mass budget melt [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_PRECIP    ! mass budget precip [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_SUBLIM    ! mass budget sublim [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_MELT      ! mass budget melt [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_SWE       ! SWE change [kg m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   M_BUDG_REFREEZE  ! refreeze mass [kg m-2]
 
 ! CRYOWRF energy budget arrays (OPTIONAL - for SNOWPACK physics)
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LW_IN    ! energy budget LW in [W m-2]
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_SENSIBLE ! energy budget sensible [W m-2]
-   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LATENT   ! energy budget latent [W m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LW_IN     ! energy budget LW in  [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LW_OUT    ! energy budget LW out [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_SW_IN     ! energy budget SW in  [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_SW_OUT    ! energy budget SW out [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_SENSIBLE  ! energy budget sensible [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_LATENT    ! energy budget latent   [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_GFLUX     ! ground heat budget     [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_RAINE     ! rain energy budget     [J m-2]
+   REAL, DIMENSION( ims:ime, jms:jme ), OPTIONAL, INTENT(INOUT)::   E_BUDG_dU        ! internal energy change [J m-2]
 
 !----------------------------------------------------------
    REAL, DIMENSION( ims:ime, jms:jme ), INTENT(OUT)::   BR
@@ -4402,8 +4413,9 @@ CONTAINS
             acsnow, emiss, qsfc,                                &
             z0, znt,                                            &
             sn_t, sn_thick, sn_voli, sn_volw, sn_volv, sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers, &
-            m_budg_precip, m_budg_sublim, m_budg_melt, &
-            e_budg_lw_in, e_budg_sensible, e_budg_latent, &
+            m_budg_precip, m_budg_sublim, m_budg_melt, m_budg_swe, m_budg_refreeze, &
+            e_budg_lw_in, e_budg_lw_out, e_budg_sw_in, e_budg_sw_out, &
+            e_budg_sensible, e_budg_latent, e_budg_gflux, e_budg_raine, e_budg_du, &
             ids, ide, jds, jde, kds, kde, &
             ims, ime, jms, jme, kms, kme, &
             i_start(ij), i_end(ij), j_start(ij), j_end(ij), kts, kte &

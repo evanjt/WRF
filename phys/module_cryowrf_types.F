@@ -7,8 +7,48 @@ MODULE module_snowpack_types
 USE, INTRINSIC :: ISO_C_BINDING, ONLY: C_INT, C_DOUBLE, C_PTR, C_NULL_PTR, C_LOC
 IMPLICIT NONE
 
+INTERFACE
+    FUNCTION snowpack_get_snow_roughness_length() BIND(C, name='snowpack_get_snow_roughness_length')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_snow_roughness_length
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_temperature() BIND(C, name='snowpack_get_default_soil_temperature')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_temperature
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_moisture_avail() BIND(C, name='snowpack_get_default_soil_moisture_avail')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_moisture_avail
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_moisture_total() BIND(C, name='snowpack_get_default_soil_moisture_total')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_moisture_total
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_moisture_vol() BIND(C, name='snowpack_get_default_soil_moisture_vol')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_moisture_vol
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_moisture_liq() BIND(C, name='snowpack_get_default_soil_moisture_liq')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_moisture_liq
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_density() BIND(C, name='snowpack_get_default_soil_density')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_density
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_conductivity() BIND(C, name='snowpack_get_default_soil_conductivity')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_conductivity
+    END FUNCTION
+    FUNCTION snowpack_get_default_soil_heat_capacity() BIND(C, name='snowpack_get_default_soil_heat_capacity')
+        USE ISO_C_BINDING
+        REAL(C_DOUBLE) :: snowpack_get_default_soil_heat_capacity
+    END FUNCTION
+END INTERFACE
+
 ! Maximum number of snow layers for arrays
 INTEGER, PARAMETER :: MAX_SNOW_LAYERS = 100
+INTEGER, PARAMETER :: MAX_SOIL_LAYERS = 4
 
 !-------------------------------------------------------------------
 ! C-interoperable structs matching C++ definitions in snowpack_bridge_structs.h
@@ -56,6 +96,10 @@ TYPE, BIND(C) :: SnowpackOutput_C
     REAL(C_DOUBLE) :: soil_moisture_liquid
     REAL(C_DOUBLE) :: soil_moisture_avail
     REAL(C_DOUBLE) :: soil_moisture_total
+    INTEGER(C_INT) :: soil_layer_count
+    REAL(C_DOUBLE) :: soil_temp_layers(MAX_SOIL_LAYERS)
+    REAL(C_DOUBLE) :: soil_moisture_vol_layers(MAX_SOIL_LAYERS)
+    REAL(C_DOUBLE) :: soil_moisture_liq_layers(MAX_SOIL_LAYERS)
 END TYPE SnowpackOutput_C
 
 TYPE, BIND(C) :: SnowpackLayerData_C
@@ -205,6 +249,13 @@ TYPE :: SoilState
     REAL    :: moisture_volumetric ! Volumetric soil moisture [m³/m³]
     REAL    :: moisture_liquid    ! Liquid soil moisture [m³/m³]
     REAL    :: temperature        ! Soil temperature [K]
+    REAL    :: density            ! Soil density [kg/m³]
+    REAL    :: conductivity       ! Soil thermal conductivity [W/m/K]
+    REAL    :: heat_capacity      ! Soil heat capacity [J/kg/K]
+    INTEGER :: layer_count        ! Number of soil layers provided
+    REAL    :: moisture_vol_layers(MAX_SOIL_LAYERS)
+    REAL    :: moisture_liq_layers(MAX_SOIL_LAYERS)
+    REAL    :: temperature_layers(MAX_SOIL_LAYERS)
 END TYPE SoilState
 
 !-------------------------------------------------------------------
@@ -279,8 +330,9 @@ SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
     ! Initialize atmospheric variables (CRYOWRF compatibility)
     snowpack_data%surface%friction_velocity = 0.0
     snowpack_data%surface%stability_param = 0.0
-    snowpack_data%surface%roughness_mom = 0.002
-    snowpack_data%surface%roughness_heat = 0.002
+    ! Initial placeholder: overwritten after the first Snowpack call
+    snowpack_data%surface%roughness_mom = REAL(snowpack_get_snow_roughness_length(), KIND=KIND(1.0))
+    snowpack_data%surface%roughness_heat = snowpack_data%surface%roughness_mom
     snowpack_data%surface%heat_latent_kg = 0.0
     snowpack_data%surface%moisture_flux = 0.0
 
@@ -288,11 +340,19 @@ SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
     ! NOTE: These values are NOT used - real SNOWPACK soil data is handled elsewhere
     ! SNOWPACK soil data is extracted in bridge.cpp and passed through module_sf_cryowrf.F
     ! CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
-    snowpack_data%soil%moisture_avail = 0.6      ! Interface placeholder (not used)
-    snowpack_data%soil%moisture_total = 80.0    ! Interface placeholder (not used) [mm]
-    snowpack_data%soil%moisture_volumetric = 0.3 ! Interface placeholder (not used) [%]
-    snowpack_data%soil%moisture_liquid = 0.3     ! Interface placeholder (not used)
-    snowpack_data%soil%temperature = 273.15      ! Interface placeholder (not used) [K]
+    ! Initial placeholders: each field is replaced with Snowpack output at runtime
+    snowpack_data%soil%moisture_avail = REAL(snowpack_get_default_soil_moisture_avail(), KIND=KIND(1.0))
+    snowpack_data%soil%moisture_total = REAL(snowpack_get_default_soil_moisture_total(), KIND=KIND(1.0))
+    snowpack_data%soil%moisture_volumetric = REAL(snowpack_get_default_soil_moisture_vol(), KIND=KIND(1.0))
+    snowpack_data%soil%moisture_liquid = REAL(snowpack_get_default_soil_moisture_liq(), KIND=KIND(1.0))
+    snowpack_data%soil%temperature = REAL(snowpack_get_default_soil_temperature(), KIND=KIND(1.0))
+    snowpack_data%soil%density = REAL(snowpack_get_default_soil_density(), KIND=KIND(1.0))
+    snowpack_data%soil%conductivity = REAL(snowpack_get_default_soil_conductivity(), KIND=KIND(1.0))
+    snowpack_data%soil%heat_capacity = REAL(snowpack_get_default_soil_heat_capacity(), KIND=KIND(1.0))
+    snowpack_data%soil%layer_count = 0
+    snowpack_data%soil%moisture_vol_layers = 0.0
+    snowpack_data%soil%moisture_liq_layers = 0.0
+    snowpack_data%soil%temperature_layers = REAL(snowpack_get_default_soil_temperature(), KIND=KIND(1.0))
     
 END SUBROUTINE initialize_snowpack_interface
 
@@ -585,6 +645,27 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     snowpack_data%budgets%energy_rain = REAL(budgets_c%energy_rain)
     snowpack_data%budgets%energy_total = REAL(budgets_c%energy_total)
 
+    ! Store soil state
+    snowpack_data%soil%moisture_volumetric = REAL(output_c%soil_moisture_volumetric)
+    snowpack_data%soil%temperature = REAL(output_c%soil_temperature)
+    snowpack_data%soil%density = REAL(output_c%soil_density)
+    snowpack_data%soil%conductivity = REAL(output_c%soil_conductivity)
+    snowpack_data%soil%heat_capacity = REAL(output_c%soil_heat_capacity)
+    snowpack_data%soil%moisture_liquid = REAL(output_c%soil_moisture_liquid)
+    snowpack_data%soil%moisture_avail = REAL(output_c%soil_moisture_avail)
+    snowpack_data%soil%moisture_total = REAL(output_c%soil_moisture_total)
+    snowpack_data%soil%layer_count = MIN(output_c%soil_layer_count, MAX_SOIL_LAYERS)
+    DO k = 1, snowpack_data%soil%layer_count
+        snowpack_data%soil%temperature_layers(k) = REAL(output_c%soil_temp_layers(k))
+        snowpack_data%soil%moisture_vol_layers(k) = REAL(output_c%soil_moisture_vol_layers(k))
+        snowpack_data%soil%moisture_liq_layers(k) = REAL(output_c%soil_moisture_liq_layers(k))
+    END DO
+    DO k = snowpack_data%soil%layer_count + 1, MAX_SOIL_LAYERS
+        snowpack_data%soil%temperature_layers(k) = snowpack_data%soil%temperature
+        snowpack_data%soil%moisture_vol_layers(k) = snowpack_data%soil%moisture_volumetric
+        snowpack_data%soil%moisture_liq_layers(k) = snowpack_data%soil%moisture_liquid
+    END DO
+
     ! Calculate additional budget components if enabled
     IF (snowpack_data%config%enable_mass_budgets) THEN
         CALL update_mass_budgets_structured(snowpack_data)
@@ -646,8 +727,13 @@ SUBROUTINE update_energy_budgets_structured(snowpack_data)
     TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     
     REAL :: dt_sec
+    REAL :: lw_out_flux, ground_flux, rain_flux, total_flux
     
     dt_sec = snowpack_data%config%dt
+    lw_out_flux = snowpack_data%budgets%energy_lw_out
+    ground_flux = snowpack_data%budgets%energy_ground
+    rain_flux = snowpack_data%budgets%energy_rain
+    total_flux = snowpack_data%budgets%energy_total
     
     ! Energy budget components [J/m²] over timestep
     snowpack_data%budgets%energy_sw_in = snowpack_data%atmos%shortwave_down * dt_sec
@@ -656,6 +742,10 @@ SUBROUTINE update_energy_budgets_structured(snowpack_data)
     snowpack_data%budgets%energy_lw_in = snowpack_data%atmos%longwave_down * dt_sec
     snowpack_data%budgets%energy_sensible = snowpack_data%surface%heat_sensible * dt_sec
     snowpack_data%budgets%energy_latent = snowpack_data%surface%heat_latent * dt_sec
+    snowpack_data%budgets%energy_lw_out = lw_out_flux * dt_sec
+    snowpack_data%budgets%energy_ground = ground_flux * dt_sec
+    snowpack_data%budgets%energy_rain = rain_flux * dt_sec
+    snowpack_data%budgets%energy_total = total_flux * dt_sec
     
 END SUBROUTINE update_energy_budgets_structured
 

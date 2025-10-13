@@ -47,6 +47,8 @@ rconfig   logical sn_start_from_file      namelist,physics   max_domains  .false
 rconfig   real    snpack_dt               namelist,physics   max_domains  900     irh    "snpack_dt"              "SNOWPACK timestep"                       "s"
 rconfig   real    snpack_write_dt         namelist,physics   max_domains  21600   irh    "snpack_write_dt"        "SNOWPACK write interval"                 "s"
 rconfig   character snpack_mode           namelist,physics   max_domains  "antarctica" -  "snpack_mode"           "SNOWPACK mode (antarctica/alps)"         ""
+rconfig   logical snpack_multi_layer_soil namelist,physics   max_domains  .false. irh    "snpack_multi_layer_soil" "Use multi-layer soil export"             ""
+rconfig   logical snpack_enable_coupling  namelist,physics   max_domains  .true.  irh    "snpack_enable_coupling"  "Enable SNOWPACK/CRYOWRF coupling"        ""
 
 # CRYOWRF-compatible snow layer arrays (without blowing snow complexity)
 state   real    sn_T     i{snpacky}j   misc         1         Z     rhd=(interp_fcn_nn)     "sn_T"      "snowpack layer temperature" "K"
