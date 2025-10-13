@@ -50,29 +50,39 @@ SUBROUTINE initialize_snowpack_module_config()
     CHARACTER(LEN=256) :: snowpack_config_path
     INTEGER :: domain_id
     
-    IF (config_initialized) RETURN
-    
-    ! Get SNOWPACK configuration file path from namelist
-    domain_id = 1  ! Default to domain 1 for initialization
-    CALL nl_get_snowpack_config_file(domain_id, snowpack_config_path)
-    
-    ! Use namelist-specified path or default
-    IF (LEN_TRIM(snowpack_config_path) > 0) THEN
-        config_file_path = TRIM(snowpack_config_path)
+    LOGICAL :: already_configured
+
+    already_configured = .FALSE.
+
+!$OMP CRITICAL(snowpack_config_init)
+    IF (config_initialized) THEN
+        already_configured = .TRUE.
     ELSE
-        config_file_path = './io.ini'
-    ENDIF
-    
-    ! Initialize SNOWPACK configuration with the file
-    CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
-    
-    ! Note: WRF time initialization will be done later in snowpacklsm() 
-    ! when namelist is fully available (CRYOWRF pattern)
-    
-    config_initialized = .true.
-    
-    ! Diagnostic message
-    CALL wrf_message('*** SNOWPACK LSM: Initialized with config file: ' // TRIM(config_file_path) // ' ***')
+        ! Get SNOWPACK configuration file path from namelist
+        domain_id = 1  ! Default to domain 1 for initialization
+        CALL nl_get_snowpack_config_file(domain_id, snowpack_config_path)
+
+        ! Use namelist-specified path or default
+        IF (LEN_TRIM(snowpack_config_path) > 0) THEN
+            config_file_path = TRIM(snowpack_config_path)
+        ELSE
+            config_file_path = './io.ini'
+        ENDIF
+
+        ! Initialize SNOWPACK configuration with the file
+        CALL initialize_snowpack_config_c(TRIM(config_file_path)//C_NULL_CHAR)
+
+        ! Note: WRF time initialization will be done later in snowpacklsm()
+        ! when namelist is fully available (CRYOWRF pattern)
+
+        config_initialized = .TRUE.
+
+        ! Diagnostic message
+        CALL wrf_message('*** SNOWPACK LSM: Initialized with config file: ' // TRIM(config_file_path) // ' ***')
+    END IF
+!$OMP END CRITICAL(snowpack_config_init)
+
+    IF (already_configured) RETURN
     
 END SUBROUTINE initialize_snowpack_module_config
 

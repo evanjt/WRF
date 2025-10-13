@@ -4,40 +4,46 @@
 #include <cstring>
 #include <string>
 #include <limits.h>
+#include <mutex>
 
 #include "meteoio/meteoio/MeteoIO.h"
 #include "snowpack/SnowpackConfig.h"
 #include "config.h"
 
+// Global configuration cache to ensure all SnowpackConfig objects share the same data
+namespace {
+    std::shared_ptr<mio::Config> g_cached_config;
+    std::mutex g_config_mutex;
+    std::string g_last_config_path;
+}
+
 // SnowpackConfigManager implementation
 mio::Config SnowpackConfigManager::loadConfiguration(const std::string& ini_file_path) {
     try {
-        // Use SnowpackConfig instead of mio::Config to get SNOWPACK defaults
-
-        // Get absolute path
+        // Get absolute path for consistent caching
         char abs_path[PATH_MAX];
+        std::string resolved_path;
         if (realpath(ini_file_path.c_str(), abs_path) != NULL) {
-            printf("SNOWPACK-DEBUG: Loading SnowpackConfig from %s (absolute: %s)\n", ini_file_path.c_str(), abs_path);
+            resolved_path = std::string(abs_path);
         } else {
-            printf("SNOWPACK-DEBUG: Loading SnowpackConfig from %s (could not resolve absolute path)\n", ini_file_path.c_str());
+            resolved_path = ini_file_path;
         }
 
+        // Thread-safe global configuration cache
+        std::lock_guard<std::mutex> lock(g_config_mutex);
+
+        if (g_cached_config && g_last_config_path == resolved_path) {
+            printf("SNOWPACK-DEBUG: Using cached configuration for %s\n", ini_file_path.c_str());
+            return *g_cached_config;  // Return copy of cached config
+        }
+
+        printf("SNOWPACK-DEBUG: Loading and caching new SnowpackConfig from %s (absolute: %s)\n",
+               ini_file_path.c_str(), resolved_path.c_str());
+
+        // Create new config and cache it
         SnowpackConfig config(ini_file_path);
-
-        // Check if SNOW_WRITE exists in the configuration
-        if (config.keyExists("SNOW_WRITE", "Output")) {
-            printf("SNOWPACK-DEBUG: SNOW_WRITE found in Output section\n");
-            std::string snow_write_value = config.get("SNOW_WRITE", "Output");
-            printf("SNOWPACK-DEBUG: SNOW_WRITE value = '%s'\n", snow_write_value.c_str());
-        } else {
-            printf("SNOWPACK-DEBUG: SNOW_WRITE NOT found in Output section\n");
-        }
-
-        // Check for other missing parameters
-        printf("SNOWPACK-DEBUG: Checking for missing parameters...\n");
-        printf("SNOWPACK-DEBUG: RIME_INDEX exists: %s\n", config.keyExists("RIME_INDEX", "SnowpackAdvanced") ? "YES" : "NO");
-        printf("SNOWPACK-DEBUG: WATER_LAYER exists: %s\n", config.keyExists("WATER_LAYER", "SnowpackAdvanced") ? "YES" : "NO");
-        printf("SNOWPACK-DEBUG: TIME_ZONE exists: %s\n", config.keyExists("TIME_ZONE", "Input") ? "YES" : "NO");
+        g_cached_config = std::make_shared<mio::Config>(config);  // Cache the base mio::Config
+        g_last_config_path = resolved_path;
 
         const double calculation_step_length = config.get("CALCULATION_STEP_LENGTH", "Snowpack");
         const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds

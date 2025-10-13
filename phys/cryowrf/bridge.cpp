@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <pthread.h>
 
 #include "bridge.h"
 
@@ -339,14 +340,17 @@ private:
     int call_counter_ = 0;
     int compute_counter_ = 0;
     bool first_call_ = true;
+    std::mutex mutex_;
 
 public:
     void advance_time(const MeteoInput& input, mio::Date& current_time, double calculation_step_length) {
+        std::lock_guard<std::mutex> lock(mutex_);
         initialize_time_step_internal(input, current_time, calculation_step_length,
-                                    call_counter_, compute_counter_, first_call_);
+                                      call_counter_, compute_counter_, first_call_);
     }
 
     void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
         call_counter_ = 0;
         compute_counter_ = 0;
         first_call_ = true;
@@ -361,6 +365,10 @@ void advance_simulation_time(const MeteoInput& input, mio::Date& current_time, d
         g_time_manager.advance_time(input, current_time, calculation_step_length);
 }
 
+void reset_time_manager() {
+        g_time_manager.reset();
+}
+
 }
 void SnowpackBridge::initialize_time(
     int start_year,
@@ -369,28 +377,35 @@ void SnowpackBridge::initialize_time(
     int start_hour,
     int start_minute
 ) {
-    if (time_initialized_) {
+    if (time_initialized_.load(std::memory_order_acquire)) {
         return;
     }
 
-    if (!config_initialized_) {
+    if (!config_initialized_.load(std::memory_order_acquire)) {
         throw std::runtime_error("Configuration must be initialized before time");
     }
 
-    try {
-        current_simulation_date_ = mio::Date(start_year, start_month, start_day,
-                                           start_hour, start_minute, 0.0, 0.0);
+    std::call_once(time_once_, [this, start_year, start_month, start_day, start_hour, start_minute]() {
+        try {
+            current_simulation_date_ = mio::Date(start_year, start_month, start_day,
+                                                 start_hour, start_minute, 0.0, 0.0);
 
-        // Get calculation step length from configuration (in minutes)
-        calculation_step_length_ = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
-        time_initialized_ = true;
+            // Get calculation step length from configuration (in minutes)
+            calculation_step_length_ = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
+            SnowpackUtils::reset_time_manager();
+            time_initialized_.store(true, std::memory_order_release);
 
-        printf("SNOWPACK-INFO: Time initialized to %04d-%02d-%02d %02d:%02d\n",
-               start_year, start_month, start_day, start_hour, start_minute);
+            printf("SNOWPACK-INFO: Time initialized to %04d-%02d-%02d %02d:%02d\n",
+                   start_year, start_month, start_day, start_hour, start_minute);
 
-    } catch (const std::exception& e) {
-        printf("SNOWPACK-FATAL: Time initialization failed: %s\n", e.what());
-        throw;
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-FATAL: Time initialization failed: %s\n", e.what());
+            throw;
+        }
+    });
+
+    if (!time_initialized_.load(std::memory_order_acquire)) {
+        throw std::runtime_error("SNOWPACK-ERROR: Time not initialized");
     }
 }
 
@@ -399,14 +414,24 @@ Snowpack* SnowpackBridge::get_or_create_snowpack_instance(int i_grid, int j_grid
                                                         double wrf_lat, double wrf_lon, double wrf_alt) {
     std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
 
-    auto it = grid_snowpack_instances_.find(station_key);
-    if (it != grid_snowpack_instances_.end()) {
-        return it->second.get();
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        auto it = grid_snowpack_instances_.find(station_key);
+        if (it != grid_snowpack_instances_.end()) {
+            return it->second.get();
+        }
     }
 
     auto snowpack = std::unique_ptr<Snowpack>(new Snowpack(*config_));
     Snowpack* snowpack_ptr = snowpack.get();
-    grid_snowpack_instances_[station_key] = std::move(snowpack);
+
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        auto insert_result = grid_snowpack_instances_.emplace(station_key, std::move(snowpack));
+        if (!insert_result.second) {
+            snowpack_ptr = insert_result.first->second.get();
+        }
+    }
 
     return snowpack_ptr;
 }
@@ -419,9 +444,12 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(
     bool use_soil = false;
 
     // Check if SnowStation already exists for this grid point
-    auto station_it = grid_snowstations_.find(station_key);
-    if (station_it != grid_snowstations_.end()) {
-        return station_it->second.get();
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        auto station_it = grid_snowstations_.find(station_key);
+        if (station_it != grid_snowstations_.end()) {
+            return station_it->second.get();
+        }
     }
 
     // Create new SnowStation for this grid point - read configuration for correct parameters
@@ -521,14 +549,21 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(
 
     // Store the new SnowStation
     SnowStation* station_ptr = new_station.get();
-    grid_snowstations_[station_key] = std::move(new_station);
+
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        auto insert_result = grid_snowstations_.emplace(station_key, std::move(new_station));
+        if (!insert_result.second) {
+            station_ptr = insert_result.first->second.get();
+        }
+    }
 
     return station_ptr;
 }
 
 SnowStation* SnowpackBridge::get_existing_snowstation(int i_grid, int j_grid) {
     std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
-
+    std::lock_guard<std::mutex> lock(station_mutex_);
     auto it = grid_snowstations_.find(station_key);
     if (it != grid_snowstations_.end()) {
         return it->second.get();
@@ -538,18 +573,25 @@ SnowStation* SnowpackBridge::get_existing_snowstation(int i_grid, int j_grid) {
 }
 
 void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
-    if (!io_ || !config_initialized_) {
+    if (!io_ || !config_initialized_.load(std::memory_order_acquire)) {
         return;
     }
 
     std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
-    auto station_it = grid_snowstations_.find(station_key);
+    SnowStation* station_ptr = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        auto station_it = grid_snowstations_.find(station_key);
+        if (station_it != grid_snowstations_.end()) {
+            station_ptr = station_it->second.get();
+        }
+    }
 
-    if (station_it != grid_snowstations_.end()) {
+    if (station_ptr) {
         try {
             // Use correct SNOWPACK API
             ZwischenData zdata;  // Empty for basic usage
-            io_->writeSnowCover(current_simulation_date_, *(station_it->second), zdata, true);
+            io_->writeSnowCover(current_simulation_date_, *station_ptr, zdata, true);
         } catch (const std::exception& e) {
             printf("SNOWPACK-ERROR: Failed to save state for grid (%d,%d): %s\n",
                    i_grid, j_grid, e.what());
@@ -558,15 +600,24 @@ void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
 }
 
 void SnowpackBridge::save_all_snowpack_states() {
-    if (!io_ || !config_initialized_) {
+    if (!io_ || !config_initialized_.load(std::memory_order_acquire)) {
         printf("SNOWPACK-WARNING: Cannot save states - IO not initialized\n");
         return;
     }
 
     int saved_count = 0;
-    for (auto it = grid_snowstations_.begin(); it != grid_snowstations_.end(); ++it) {
-        const std::string& key = it->first;
-        SnowStation* station = it->second.get();
+    std::vector<std::pair<std::string, SnowStation*>> stations_snapshot;
+    {
+        std::lock_guard<std::mutex> lock(station_mutex_);
+        stations_snapshot.reserve(grid_snowstations_.size());
+        for (const auto& entry : grid_snowstations_) {
+            stations_snapshot.emplace_back(entry.first, entry.second.get());
+        }
+    }
+
+    for (const auto& entry : stations_snapshot) {
+        const std::string& key = entry.first;
+        SnowStation* station = entry.second;
         try {
             // Use correct SNOWPACK API
             ZwischenData zdata;  // Empty for basic usage
@@ -595,22 +646,22 @@ void SnowpackBridge::execute_snowpack(
     }
 
     // Track physics calls for debugging
-    execute_call_count_++;
-    if (execute_call_count_ <= 5 || (execute_call_count_ % 1000 == 0)) {
-        if (execute_call_count_ <= 5) {
-            printf("SNOWPACK-INFO: Executed snowpack call #%d - Grid (%d,%d)\n", execute_call_count_, input.i_grid, input.j_grid);
+    int call_count = ++execute_call_count_;
+    if (call_count <= 5 || (call_count % 1000 == 0)) {
+        if (call_count <= 5) {
+            printf("SNOWPACK-INFO: Executed snowpack call #%d - Grid (%d,%d)\n", call_count, input.i_grid, input.j_grid);
         } else {
-            printf("SNOWPACK-INFO: Executed %d snowpack calls\n", execute_call_count_);
+            printf("SNOWPACK-INFO: Executed %d snowpack calls\n", call_count);
         }
     }
 
     // Validate initialization
-    if (!config_initialized_) {
+    if (!config_initialized_.load(std::memory_order_acquire)) {
         printf("SNOWPACK-FATAL: Configuration not initialized - call initialize_config() first\n");
         std::abort();
     }
 
-    if (!time_initialized_) {
+    if (!time_initialized_.load(std::memory_order_acquire)) {
         printf("SNOWPACK-FATAL: Time not initialized - call initialize_time() first\n");
         std::abort();
     }
@@ -682,40 +733,63 @@ SnowpackBridge& g_snowpack_bridge = SnowpackBridge::instance();
 
 
 void SnowpackBridge::initialize_config(const std::string& ini_path) {
-    if (config_initialized_) {
+    if (config_initialized_.load(std::memory_order_acquire)) {
         return;
     }
 
-    try {
-        mio::Config file_config = SnowpackConfigManager::loadConfiguration(ini_path);
-        SnowpackConfigManager::validateConfiguration(file_config);
+    std::call_once(config_once_, [this, ini_path]() {
+        // DEBUG: Track initialization attempts
+        printf("SNOWPACK-DEBUG: initialize_config invoked by thread %lu\n", pthread_self());
 
-        config_ = std::unique_ptr<SnowpackConfig>(new SnowpackConfig(file_config));
+        try {
+            mio::Config file_config = SnowpackConfigManager::loadConfiguration(ini_path);
+            SnowpackConfigManager::validateConfiguration(file_config);
 
-        // IMPORTANT: Ensure METEO_STEP_LENGTH is available in the final config
-        // SnowpackConfig might re-read the ini file, so we need to inject METEO_STEP_LENGTH again
-        const double calculation_step_length = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
-        const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds
+            config_ = std::unique_ptr<SnowpackConfig>(new SnowpackConfig(file_config));
 
-        std::stringstream ss_meteo_length;
-        ss_meteo_length << meteo_step_length;
-        config_->addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
+            // IMPORTANT: Ensure METEO_STEP_LENGTH is available in the final config
+            // SnowpackConfig might re-read the ini file, so we need to inject METEO_STEP_LENGTH again
+            const double calculation_step_length = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
+            const double meteo_step_length = calculation_step_length * 60.0; // Convert minutes to seconds
 
-        // Verify it was added
-        std::string verify_value;
-        config_->getValue("METEO_STEP_LENGTH", "Snowpack", verify_value);
-        printf("SNOWPACK-CONFIG: Final METEO_STEP_LENGTH set to %s seconds (from CALCULATION_STEP_LENGTH=%.1f minutes)\n",
-               verify_value.c_str(), calculation_step_length);
+            std::stringstream ss_meteo_length;
+            ss_meteo_length << meteo_step_length;
+            config_->addKey("METEO_STEP_LENGTH", "Snowpack", ss_meteo_length.str());
 
-        io_ = std::unique_ptr<SnowpackIO>(new SnowpackIO(*config_));
+            // Verify it was added
+            std::string verify_value;
+            config_->getValue("METEO_STEP_LENGTH", "Snowpack", verify_value);
+            printf("SNOWPACK-CONFIG: Final METEO_STEP_LENGTH set to %s seconds (from CALCULATION_STEP_LENGTH=%.1f minutes)\n",
+                   verify_value.c_str(), calculation_step_length);
 
-        config_file_path_ = ini_path;
-        config_initialized_ = true;
+            // DEBUG: Check config pointer and content before creating SnowpackIO
+            printf("SNOWPACK-DEBUG: About to create SnowpackIO with config_=0x%p\n", (void*)config_.get());
+            if (config_) {
+                printf("SNOWPACK-DEBUG: Config SNOW_WRITE exists: %s\n", config_->keyExists("SNOW_WRITE", "Output") ? "YES" : "NO");
+                if (config_->keyExists("SNOW_WRITE", "Output")) {
+                    std::string snow_write_val = config_->get("SNOW_WRITE", "Output");
+                    printf("SNOWPACK-DEBUG: Config SNOW_WRITE value: '%s'\n", snow_write_val.c_str());
+                }
+            } else {
+                printf("SNOWPACK-DEBUG: ERROR: config_ pointer is NULL!\n");
+            }
 
-        printf("SNOWPACK-INFO: Configuration initialized from %s\n", ini_path.c_str());
+            io_ = std::unique_ptr<SnowpackIO>(new SnowpackIO(*config_));
+            printf("SNOWPACK-DEBUG: SnowpackIO created successfully\n");
 
-    } catch (const std::exception& e) {
-        printf("SNOWPACK-FATAL: Configuration failed for %s: %s\n", ini_path.c_str(), e.what());
-        throw;
+            config_file_path_ = ini_path;
+            config_initialized_.store(true, std::memory_order_release);
+
+            printf("SNOWPACK-INFO: Configuration initialized from %s\n", ini_path.c_str());
+            printf("SNOWPACK-DEBUG: Thread %lu created singleton config_=0x%p\n", pthread_self(), (void*)config_.get());
+
+        } catch (const std::exception& e) {
+            printf("SNOWPACK-FATAL: Configuration failed for %s: %s\n", ini_path.c_str(), e.what());
+            throw;
+        }
+    });
+
+    if (!config_initialized_.load(std::memory_order_acquire)) {
+        throw std::runtime_error("SNOWPACK-ERROR: Configuration not initialized");
     }
 }

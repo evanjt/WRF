@@ -1,7 +1,11 @@
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 
 #include "structs.h"
@@ -44,20 +48,25 @@ private:
     // Configuration and I/O
     std::unique_ptr<SnowpackConfig> config_;
     std::unique_ptr<SnowpackIO> io_;
-    bool config_initialized_ = false;
+    std::atomic<bool> config_initialized_{false};
     std::string config_file_path_;
 
     // Time management
     mio::Date current_simulation_date_;
-    bool time_initialized_ = false;
+    std::atomic<bool> time_initialized_{false};
     double calculation_step_length_ = 0.0;
 
     // Persistent object storage per grid point
     std::map<std::string, std::unique_ptr<SnowStation>> grid_snowstations_;
     std::map<std::string, std::unique_ptr<Snowpack>> grid_snowpack_instances_;
 
+    // Synchronization primitives
+    std::once_flag config_once_;
+    std::once_flag time_once_;
+    mutable std::mutex station_mutex_;
+
     // Call tracking for debugging
-    int execute_call_count_ = 0;
+    std::atomic<int> execute_call_count_{0};
 
 public:
     // Get singleton instance
@@ -68,14 +77,14 @@ public:
 
     // Configuration management
     void initialize_config(const std::string& ini_path);
-    bool is_config_initialized() const { return config_initialized_; }
+    bool is_config_initialized() const { return config_initialized_.load(std::memory_order_acquire); }
     SnowpackConfig* get_config() const { return config_.get(); }
     SnowpackIO* get_io() const { return io_.get(); }
 
     // Time management
     void initialize_time(int start_year, int start_month, int start_day,
                         int start_hour, int start_minute);
-    bool is_time_initialized() const { return time_initialized_; }
+    bool is_time_initialized() const { return time_initialized_.load(std::memory_order_acquire); }
     const mio::Date& get_current_time() const {
         return current_simulation_date_;
     }
@@ -163,4 +172,5 @@ namespace SnowpackUtils {
     void extract_surface_outputs(const SnowStation& station, const SurfaceFluxes& fluxes, const BoundCond& bc, SnowpackOutput& output, double temp_air);
     void extract_layer_data(const SnowStation& station, SnowpackLayerData& layer_data);
     void extract_budget_data(const SurfaceFluxes& fluxes, const BoundCond& bc, double cumu_precip, const MeteoInput& input, BudgetData& budget);
+    void reset_time_manager();
 }
