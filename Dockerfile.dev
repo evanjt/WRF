@@ -10,6 +10,9 @@ ENV BASE_DIR=/home/wrfuser/wrf-build \
     LD_LIBRARY_PATH="${BASE_DIR}/libs/lib:${BASE_DIR}/libs/netcdf/lib:${BASE_DIR}/libs/grib2/lib:${BASE_DIR}/WRF/phys/cryowrf/snowpack/lib:${BASE_DIR}/WRF/phys/cryowrf/meteoio/lib" \
     PATH=".:/home/wrfuser/.local/bin:${BASE_DIR}/libs/netcdf/bin:${BASE_DIR}/libs/bin:${PATH}"
 
+USER root
+RUN apt-get update && apt-get install -y gdb nano
+
 USER wrfuser
 WORKDIR ${BASE_DIR}
 
@@ -29,9 +32,9 @@ RUN ./compile em_real -j 20 && \
         echo "Looking for executable in alternative locations..."; \
         find . -name "wrf.exe" -type f 2>/dev/null || echo "No wrf.exe found anywhere"; \
         exit 1; \
-    fi 
+    fi
 
 # Set working directory for development
-WORKDIR /home/wrfuser
+WORKDIR ${BASE_DIR}/WRF/test/em_real
 
 ENTRYPOINT ["/bin/bash"]

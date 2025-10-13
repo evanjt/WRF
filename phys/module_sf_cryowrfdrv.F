@@ -372,7 +372,10 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         rain_total = acc_rain(I,J)
 
         dt_effective = dt * REAL(acc_samples(I,J))   ! aggregate WRF steps into the Snowpack physics step
-        met_height   = MAX(1.0, 0.5*DZ8W(I,1,J))   ! CRYOWRF src/wrf/phys/module_sf_snowpacklsm.F:527 uses 0.5*DZ8W
+        ! Original CRYOWRF (src/wrf/phys/module_sf_snowpacklsm.F:527) sampled meteo at 0.5*DZ8W.  In testing,
+        ! that stronger drag raised PSFC versus baseline commit 7c8bbf08, so we temporarily restore the
+        ! earlier WRF behavior (use full DZ8W) until we retune MYNN with Snowpack-derived friction velocity.
+        met_height   = MAX(1.0, DZ8W(I,1,J))
 
         ! Reset accumulators for next cycle
         acc_ta(I,J) = 0.0
