@@ -12,6 +12,13 @@ MODULE module_sf_snowpackdrv
     ! Module-level configuration management
     LOGICAL, SAVE :: config_initialized = .false.
     CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
+
+    ! Per-grid accumulation for Meteo averaging / throttling
+    LOGICAL, SAVE :: accum_initialized = .FALSE.
+    INTEGER, SAVE :: snowpack_compute_counter = 1
+    REAL, ALLOCATABLE, SAVE :: acc_ta(:,:), acc_qv(:,:), acc_u(:,:), acc_v(:,:)
+    REAL, ALLOCATABLE, SAVE :: acc_sw(:,:), acc_lw(:,:), acc_p(:,:), acc_rain(:,:)
+    INTEGER, ALLOCATABLE, SAVE :: acc_samples(:,:)
     
     ! C interface for SNOWPACK configuration and layer extraction
     INTERFACE
@@ -206,6 +213,9 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     CHARACTER(LEN=256) :: snpack_mode
     INTEGER :: thread_id
     INTEGER :: num_threads
+    REAL :: ta_avg_val, qv_avg_val, u_avg_val, v_avg_val
+    REAL :: sw_avg_val, lw_avg_val, p_avg_val, rain_total
+    REAL :: dt_effective, met_height
 
 !-------------------------------------------------------------------
 !  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
@@ -227,6 +237,27 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     CALL nl_get_snpack_dt(domain_id, snpack_dt)
     CALL nl_get_snpack_write_dt(domain_id, snpack_write_dt)
     CALL nl_get_snpack_mode(domain_id, snpack_mode)
+
+    ! Initialize accumulation buffers (per grid point) on first entry
+#ifdef _OPENMP
+    !$OMP CRITICAL(snowpack_accum_init)
+#endif
+    IF (.NOT. accum_initialized) THEN
+        ! Mirror CRYOWRF's guard that only seeds the accumulators once (Coupler.cpp:820ff)
+        ALLOCATE(acc_ta(ims:ime, jms:jme), acc_qv(ims:ime, jms:jme), acc_u(ims:ime, jms:jme), acc_v(ims:ime, jms:jme))
+        ALLOCATE(acc_sw(ims:ime, jms:jme), acc_lw(ims:ime, jms:jme), acc_p(ims:ime, jms:jme), acc_rain(ims:ime, jms:jme))
+        ALLOCATE(acc_samples(ims:ime, jms:jme))
+        acc_ta = 0.0; acc_qv = 0.0; acc_u = 0.0; acc_v = 0.0
+        acc_sw = 0.0; acc_lw = 0.0; acc_p = 0.0; acc_rain = 0.0
+        acc_samples = 0
+        accum_initialized = .TRUE.
+    END IF
+#ifdef _OPENMP
+    !$OMP END CRITICAL(snowpack_accum_init)
+#endif
+
+    ! Determine how often Snowpack should run (relative to WRF timestep)
+    snowpack_compute_counter = MAX(1, NINT((snpack_dt*60.0) / dt))
     
     ! Initialize WRF simulation time on first call (CRYOWRF pattern)
     IF (.NOT. time_initialized) THEN
@@ -313,19 +344,57 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         IF (I <= 2 .AND. J <= 2) THEN
             WRITE(*,'(A,I10,I10)') 'SNOWPACK-DEBUG: Processing grid point I,J = ', I, J
         ENDIF
-        
+
+        ! Accumulate forcing samples before handing them to Snowpack.
+        ! Mirrors the buffering logic in the legacy coupler (CRYOWRF/src/coupler/main_coupler/Coupler.cpp:820-906).
+        acc_samples(I,J) = acc_samples(I,J) + 1
+        acc_ta(I,J)   = acc_ta(I,J)   + T_PHY(I,1,J)
+        acc_qv(I,J)   = acc_qv(I,J)   + QV_CURR(I,1,J)
+        acc_u(I,J)    = acc_u(I,J)    + U_PHY(I,1,J)
+        acc_v(I,J)    = acc_v(I,J)    + V_PHY(I,1,J)
+        acc_sw(I,J)   = acc_sw(I,J)   + SWDOWN(I,J)
+        acc_lw(I,J)   = acc_lw(I,J)   + GLW(I,J)
+        acc_p(I,J)    = acc_p(I,J)    + P8W(I,1,J)
+        acc_rain(I,J) = acc_rain(I,J) + RAINBL(I,J)
+
+        IF (acc_samples(I,J) < snowpack_compute_counter) CYCLE
+
+        ! Compute averaged forcings for Snowpack call
+        ta_avg_val = acc_ta(I,J)   / REAL(acc_samples(I,J))
+        qv_avg_val = acc_qv(I,J)   / REAL(acc_samples(I,J))
+        u_avg_val  = acc_u(I,J)    / REAL(acc_samples(I,J))
+        v_avg_val  = acc_v(I,J)    / REAL(acc_samples(I,J))
+        sw_avg_val = acc_sw(I,J)   / REAL(acc_samples(I,J))
+        lw_avg_val = acc_lw(I,J)   / REAL(acc_samples(I,J))
+        p_avg_val  = acc_p(I,J)    / REAL(acc_samples(I,J))
+        rain_total = acc_rain(I,J)
+
+        dt_effective = dt * REAL(acc_samples(I,J))   ! aggregate WRF steps into the Snowpack physics step
+        met_height   = MAX(1.0, DZ8W(I,1,J))   ! bounded measurement height (CRYOWRF resets via HEIGHT_OF_METEO_VALUES)
+
+        ! Reset accumulators for next cycle
+        acc_ta(I,J) = 0.0
+        acc_qv(I,J) = 0.0
+        acc_u(I,J)  = 0.0
+        acc_v(I,J)  = 0.0
+        acc_sw(I,J) = 0.0
+        acc_lw(I,J) = 0.0
+        acc_p(I,J)  = 0.0
+        acc_rain(I,J) = 0.0
+        acc_samples(I,J) = 0
+
         ! Initialize interface structure
         CALL initialize_snowpack_interface(interface_data, itimestep, dt, dx)
-        
+
         ! Pack WRF data into structured interface
         CALL pack_wrf_to_interface(interface_data, &
             ! Atmospheric inputs
-            T_PHY(I,1,J), QV_CURR(I,1,J), U_PHY(I,1,J), V_PHY(I,1,J), P8W(I,1,J), &
-            SWDOWN(I,J), GLW(I,J), RAINBL(I,J), &
+            ta_avg_val, qv_avg_val, u_avg_val, v_avg_val, p_avg_val, &
+            sw_avg_val, lw_avg_val, rain_total, &
             ! Grid information  
-            XLAT(I,J), XLONG(I,J), DZ8W(I,1,J), &
+            XLAT(I,J), XLONG(I,J), met_height, &
             ! Model configuration
-            DT, ITIMESTEP, &
+            dt_effective, ITIMESTEP, &
             ! Surface state (input/output)
             TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
             SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J), &

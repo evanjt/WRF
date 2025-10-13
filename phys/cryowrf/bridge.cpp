@@ -611,7 +611,7 @@ void SnowpackBridge::execute_snowpack(
     SnowpackLayerData* layer_data,
     BudgetData* budget_data
 ) {
-    static std::atomic<int> debug_trace_counter(40);
+    static std::atomic<int> debug_trace_counter(500);
     // Validate grid coordinates first
     if (input.i_grid < 0 || input.i_grid > 10000 || input.j_grid < 0 || input.j_grid > 10000) {
         printf("SNOWPACK-ERROR: Invalid grid coordinates (%d,%d) - outside expected range [0-10000]\n",
@@ -670,7 +670,7 @@ void SnowpackBridge::execute_snowpack(
         double current_snow_depth = (execute_call_count_ > 1) ? objects.station->cH : 0.0;
         SnowpackUtils::prepare_meteo_data(input, *Mdata, current_simulation_date_, current_snow_depth, config_.get());
         int trace_after_prepare = debug_trace_counter.load(std::memory_order_relaxed);
-        if (trace_after_prepare > 0 && execute_call_count_.load() <= 5) {
+        if (trace_after_prepare > 0 && execute_call_count_.load() <= 20) {
             printf("SNOWPACK-TRACE prepare [%d,%d]: tid=%lu ta=%.2f wind=%.2f rh=%.3f dt=%.1f\n",
                    input.i_grid, input.j_grid,
                    static_cast<unsigned long>(pthread_self()),
@@ -707,7 +707,7 @@ void SnowpackBridge::execute_snowpack(
             budget_data->mass_swe = output.snow_swe;  // Ensure consistency
         }
 
-        if (execute_call_count_.load() <= 5) {
+        if (execute_call_count_.load() <= 20) {
             printf("SNOWPACK-TRACE output [%d,%d]: tid=%lu Tsurf=%.2f SWE=%.2f depth=%.2f HFX=%.2f QFX=%.6f\n",
                    input.i_grid, input.j_grid,
                    static_cast<unsigned long>(pthread_self()),
@@ -727,7 +727,58 @@ void SnowpackBridge::execute_snowpack(
                input.i_grid, input.j_grid, e.what());
         printf("SNOWPACK-ERROR: Grid point (%d,%d) - Ta=%.2fK, RH=%.2f, Precip=%.3fmm\n",
                input.i_grid, input.j_grid, input.temp_air, input.humidity, input.precipitation);
-        std::abort();
+
+        // Provide a benign fallback so WRF can continue running.
+        // Equivalent to the resilience path in the original coupler (CRYOWRF/src/coupler/main_coupler/Coupler.cpp:1074 onwards).
+        output.surface_temp = input.temp_air;
+        output.snow_swe = 0.0;
+        output.snow_depth = 0.0;
+        output.heat_flux_sensible = 0.0;
+        output.heat_flux_latent = 0.0;
+        output.albedo = 0.5;
+        output.snow_coverage = 0.0;
+        output.friction_velocity = 0.0;
+        output.stability_param = 0.0;
+        output.soil_moisture_volumetric = 0.0;
+        output.soil_temperature = input.temp_air;
+        output.soil_density = 0.0;
+        output.soil_conductivity = 0.0;
+        output.soil_heat_capacity = 0.0;
+        output.soil_moisture_liquid = 0.0;
+        output.soil_moisture_avail = 0.0;
+        output.soil_moisture_total = 0.0;
+
+        if (layer_data) {
+            layer_data->n_layers = 0;
+            std::fill(std::begin(layer_data->layer_temp), std::end(layer_data->layer_temp), 0.0);
+            std::fill(std::begin(layer_data->layer_thick), std::end(layer_data->layer_thick), 0.0);
+            std::fill(std::begin(layer_data->layer_vol_ice), std::end(layer_data->layer_vol_ice), 0.0);
+            std::fill(std::begin(layer_data->layer_vol_water), std::end(layer_data->layer_vol_water), 0.0);
+            std::fill(std::begin(layer_data->layer_vol_air), std::end(layer_data->layer_vol_air), 0.0);
+            std::fill(std::begin(layer_data->layer_grain_radius), std::end(layer_data->layer_grain_radius), 0.0);
+            std::fill(std::begin(layer_data->layer_bond_radius), std::end(layer_data->layer_bond_radius), 0.0);
+            std::fill(std::begin(layer_data->layer_dendricity), std::end(layer_data->layer_dendricity), 0.0);
+            std::fill(std::begin(layer_data->layer_sphericity), std::end(layer_data->layer_sphericity), 0.0);
+        }
+
+        if (budget_data) {
+            budget_data->mass_precip = 0.0;
+            budget_data->mass_sublim = 0.0;
+            budget_data->mass_melt = 0.0;
+            budget_data->mass_swe = 0.0;
+            budget_data->mass_refreeze = 0.0;
+            budget_data->energy_lw_in = 0.0;
+            budget_data->energy_lw_out = 0.0;
+            budget_data->energy_sw_in = 0.0;
+            budget_data->energy_sw_out = 0.0;
+            budget_data->energy_sensible = 0.0;
+            budget_data->energy_latent = 0.0;
+            budget_data->energy_ground_flux = 0.0;
+            budget_data->energy_rain = 0.0;
+            budget_data->energy_total = 0.0;
+        }
+
+        return;
     }
 }
 

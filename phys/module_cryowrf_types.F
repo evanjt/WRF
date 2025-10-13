@@ -293,7 +293,7 @@ SUBROUTINE pack_wrf_to_interface(snowpack_data, &
     ! Atmospheric inputs
     t_phy, qv_curr, u_phy, v_phy, p8w, swdown, glw, rainbl, &
     ! Grid information  
-    xlat, xlong, dz8w, &
+    xlat, xlong, meas_height, &
     ! Model configuration
     dt, itimestep, &
     ! Surface state (input/output)
@@ -306,7 +306,7 @@ SUBROUTINE pack_wrf_to_interface(snowpack_data, &
     ! WRF variables
     REAL, INTENT(IN) :: t_phy, qv_curr, u_phy, v_phy, p8w
     REAL, INTENT(IN) :: swdown, glw, rainbl
-    REAL, INTENT(IN) :: xlat, xlong, dz8w
+    REAL, INTENT(IN) :: xlat, xlong, meas_height
     REAL, INTENT(IN) :: dt
     INTEGER, INTENT(IN) :: itimestep
     REAL, INTENT(INOUT) :: tsk, hfx, qfx, lh, albedo, snowc
@@ -337,7 +337,7 @@ SUBROUTINE pack_wrf_to_interface(snowpack_data, &
     snowpack_data%atmos%shortwave_down = swdown
     snowpack_data%atmos%longwave_down = glw
     snowpack_data%atmos%precipitation = rainbl
-    snowpack_data%atmos%height = dz8w
+    snowpack_data%atmos%height = meas_height
     snowpack_data%atmos%latitude = xlat
     snowpack_data%atmos%longitude = xlong
     
