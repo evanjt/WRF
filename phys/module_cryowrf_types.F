@@ -404,6 +404,9 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
 ! Structured interface to SNOWPACK physics with layer extraction
 !-------------------------------------------------------------------
     USE, INTRINSIC :: iso_c_binding
+#ifdef _OPENMP
+    USE omp_lib
+#endif
     TYPE(SnowpackInterface), INTENT(INOUT) :: snowpack_data
     REAL(C_DOUBLE), PARAMETER :: RAD2DEG = 180.0_C_DOUBLE / 3.1415926535897932384626433832795_C_DOUBLE
 
@@ -425,6 +428,14 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     TYPE(SnowpackLayerData_C), TARGET :: layers_c
     TYPE(BudgetData_C), TARGET :: budgets_c
     INTEGER :: k
+    INTEGER :: thread_id
+    INTEGER(C_INTPTR_T) :: meteo_addr
+
+#ifdef _OPENMP
+    thread_id = omp_get_thread_num()
+#else
+    thread_id = 0
+#endif
     
     ! Pack data into C-interoperable MeteoInput_C
     meteo_c%temp_air = DBLE(snowpack_data%atmos%temperature)
@@ -479,8 +490,27 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     budgets_c%energy_rain = 0.0_C_DOUBLE
     budgets_c%energy_total = 0.0_C_DOUBLE
 
+    IF (snowpack_data%config%timestep_number == 1 .AND. snowpack_data%config%i_grid <= 4 .AND. snowpack_data%config%j_grid <= 4) THEN
+        meteo_addr = TRANSFER(C_LOC(meteo_c), 0_C_INTPTR_T)
+        WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F7.3,A,F7.3)') &
+             'SNOWPACK-STRUCT pack tid=', thread_id, ' ij=', &
+             snowpack_data%config%i_grid, snowpack_data%config%j_grid, &
+             ' T=', snowpack_data%atmos%temperature, &
+             ' wind=', meteo_c%wind_speed, ' RH=', meteo_c%humidity, &
+             ' height=', meteo_c%height
+        WRITE(*,'(A,I0)') 'SNOWPACK-STRUCT meteo_ptr=', meteo_addr
+    END IF
+
     ! Call the C++ bridge using the C-interoperable derived types
     CALL snowpack_physics_c(C_LOC(meteo_c), C_LOC(output_c), C_LOC(layers_c), C_LOC(budgets_c))
+
+    IF (snowpack_data%config%timestep_number == 1 .AND. snowpack_data%config%i_grid <= 4 .AND. snowpack_data%config%j_grid <= 4) THEN
+        WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F8.2)') 'SNOWPACK-STRUCT return tid=', thread_id, &
+     &       ' ij=', snowpack_data%config%i_grid, snowpack_data%config%j_grid, &
+     &       ' Tsurf=', output_c%surface_temp, &
+     &       ' SWE=', output_c%snow_swe, &
+     &       ' depth=', output_c%snow_depth
+    END IF
 
     ! Unpack surface results back to interface structure
     snowpack_data%surface%snow_swe = REAL(output_c%snow_swe)

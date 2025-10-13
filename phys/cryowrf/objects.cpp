@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <fstream>
 #include <sys/stat.h>
@@ -32,6 +33,7 @@ bool load_station_state(const std::string& station_key,
                         const std::string& stationID,
                         const std::string& stationName,
                         SnowpackIO* io,
+                        std::mutex& io_mutex,
                         int wrf_domain_id,
                         int i_grid,
                         int j_grid) {
@@ -51,6 +53,7 @@ bool load_station_state(const std::string& station_key,
         ZwischenData zdata;
         mio::Date profile_date;
 
+        std::lock_guard<std::mutex> io_lock(io_mutex);
         io->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
 
         ssdata.meta.position = position;        // Set position with coordinates from WRF
@@ -161,7 +164,7 @@ void ensure_station_initialized(SnowStation* station,
         bool loaded_from_file = load_station_state(
             generate_grid_key(input.i_grid, input.j_grid),
             station, position, stationID, stationName,
-            bridge.get_io(), 1, input.i_grid, input.j_grid
+            bridge.get_io(), bridge.io_mutex(), 1, input.i_grid, input.j_grid
         );
 
         if (!loaded_from_file) {
@@ -175,6 +178,7 @@ void ensure_station_initialized(SnowStation* station,
 bool save_station_state(SnowStation* station,
                        const mio::Date& current_time,
                        SnowpackIO* io,
+                       std::mutex& io_mutex,
                        int i_grid,
                        int j_grid) {
     if (!station || !io) {
@@ -184,6 +188,7 @@ bool save_station_state(SnowStation* station,
 
     try {
         ZwischenData zdata;  // Empty for basic usage
+        std::lock_guard<std::mutex> io_lock(io_mutex);
         io->writeSnowCover(current_time, *station, zdata, true);
         printf("SNOWPACK-INFO: Saved .sno state for grid (%d,%d) using SnowpackIO\n", i_grid, j_grid);
         return true;
@@ -197,7 +202,8 @@ bool save_station_state(SnowStation* station,
 
 void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowStation>>& stations,
                              const mio::Date& current_time,
-                             SnowpackIO* io) {
+                             SnowpackIO* io,
+                             std::mutex& io_mutex) {
     if (!io) {
         printf("SNOWPACK-WARNING: Cannot save states - IO not initialized\n");
         return;
@@ -215,6 +221,7 @@ void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowSta
                 int j_grid = std::stoi(key.substr(underscore_pos + 1));
 
                 ZwischenData zdata;  // Empty for basic usage
+                std::lock_guard<std::mutex> io_lock(io_mutex);
                 io->writeSnowCover(current_time, *station, zdata, true);
                 saved_count++;
             }

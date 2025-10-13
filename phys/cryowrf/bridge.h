@@ -64,6 +64,7 @@ private:
     std::once_flag config_once_;
     std::once_flag time_once_;
     mutable std::mutex station_mutex_;
+    mutable std::mutex io_mutex_;
 
     // Call tracking for debugging
     std::atomic<int> execute_call_count_{0};
@@ -80,6 +81,7 @@ public:
     bool is_config_initialized() const { return config_initialized_.load(std::memory_order_acquire); }
     SnowpackConfig* get_config() const { return config_.get(); }
     SnowpackIO* get_io() const { return io_.get(); }
+    std::mutex& io_mutex() const { return io_mutex_; }
 
     // Time management
     void initialize_time(int start_year, int start_month, int start_day,
@@ -147,12 +149,14 @@ void ensure_station_initialized(SnowStation* station,
 bool save_station_state(SnowStation* station,
                        const mio::Date& current_time,
                        SnowpackIO* io,
+                       std::mutex& io_mutex,
                        int i_grid,
                        int j_grid);
 
 void save_all_station_states(const std::map<std::string, std::unique_ptr<SnowStation>>& stations,
                              const mio::Date& current_time,
-                             SnowpackIO* io);
+                             SnowpackIO* io,
+                             std::mutex& io_mutex);
 
 void validate_output_values(const SnowpackOutput& output, int i_grid, int j_grid);
 

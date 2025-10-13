@@ -5,6 +5,9 @@
 !
 MODULE module_sf_snowpackdrv
     USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR
+#ifdef _OPENMP
+    USE omp_lib
+#endif
 
     ! Module-level configuration management
     LOGICAL, SAVE :: config_initialized = .false.
@@ -201,6 +204,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     LOGICAL :: sn_start_from_file
     REAL :: snpack_dt, snpack_write_dt
     CHARACTER(LEN=256) :: snpack_mode
+    INTEGER :: thread_id
+    INTEGER :: num_threads
 
 !-------------------------------------------------------------------
 !  Call SNOWPACK physics (simplified interface without CRYOWRF arrays)
@@ -269,9 +274,6 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode)
     END IF
 
-    ! Debug: Print loop bounds to identify coordinate corruption
-    WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-DEBUG: Loop bounds its,ite,jts,jte = ', its, ite, jts, jte
-
     ! Safety check: Verify loop bounds are reasonable
     IF (its < 0 .OR. ite < 0 .OR. jts < 0 .OR. jte < 0) THEN
         WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Negative loop bounds detected! its,ite,jts,jte = ', its, ite, jts, jte
@@ -286,6 +288,19 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     IF (ite > 10000 .OR. jte > 10000) THEN
         WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Loop bounds too large! its,ite,jts,jte = ', its, ite, jts, jte
         RETURN
+    ENDIF
+
+#ifdef _OPENMP
+    thread_id = omp_get_thread_num()
+    num_threads = omp_get_num_threads()
+#else
+    thread_id = 0
+    num_threads = 1
+#endif
+
+    IF (itimestep == 1 .AND. thread_id == 0) THEN
+        WRITE(*,'(A,I4,A,4I10,A,I4)') 'SNOWPACK-TRACE tid=', thread_id, &
+     &        ' its,ite,jts,jte=', its, ite, jts, jte, ' nthreads=', num_threads
     ENDIF
 
     ! Grid loop with structured data approach
@@ -316,10 +331,33 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             SNOW(I,J), SNOWH(I,J), QSFC(I,J), Z0(I,J), ZNT(I,J), &
             ! Grid indices
             I, J, 1)
-        
-        ! Call SNOWPACK physics with structured interface
+
+        IF (itimestep == 1 .AND. I == its .AND. J == jts) THEN
+            WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F7.3,A,F7.3)') &
+     &             'SNOWPACK-PACK tid=', thread_id, ' ij=', I, J, &
+     &             ' lat=', interface_data%atmos%latitude, &
+     &             ' lon=', interface_data%atmos%longitude, &
+     &             ' T=', interface_data%atmos%temperature, &
+     &             ' RH=', interface_data%atmos%humidity
+            WRITE(*,'(A,F8.2,A,F8.2,A,F8.3)') 'SNOWPACK-PACK wind_u=', &
+     &             interface_data%atmos%wind_u, ' wind_v=', interface_data%atmos%wind_v, &
+     &             ' precip=', interface_data%atmos%precipitation
+        END IF
+
+        ! Call SNOWPACK physics with structured interface (serialize core)
+        !$OMP CRITICAL(snowpack_bridge)
         CALL snowpack_physics_structured(interface_data)
-        
+
+        IF (itimestep == 1 .AND. I == its .AND. J == jts) THEN
+            WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F8.2)') &
+     &           'SNOWPACK-RETURN tid=', thread_id, ' ij=', I, J, &
+     &           ' Tsurf=', interface_data%surface%surface_temp, &
+     &           ' SWE=', interface_data%surface%snow_swe, &
+     &           ' depth=', interface_data%surface%snow_depth
+            WRITE(*,'(A,F8.2,A,F8.2)') 'SNOWPACK-RETURN HFX=', &
+     &           interface_data%surface%heat_sensible, ' QFX=', interface_data%surface%heat_latent_kg
+        END IF
+
         ! Unpack results back to WRF variables
         CALL unpack_interface_to_wrf(interface_data, &
             TSK(I,J), HFX(I,J), QFX(I,J), LH(I,J), ALBEDO(I,J), SNOWC(I,J), &
@@ -356,6 +394,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             E_BUDG_SENSIBLE(I,J) = interface_data%budgets%energy_sensible ! Sensible heat [J/m²]
             E_BUDG_LATENT(I,J) = interface_data%budgets%energy_latent    ! Latent heat [J/m²]
         END IF
+
+        !$OMP END CRITICAL(snowpack_bridge)
 
         ! Additional CRYOWRF budget components (extracted but not passed to WRF standard interface)
         ! These are available for diagnostics and future CRYOWRF compatibility:

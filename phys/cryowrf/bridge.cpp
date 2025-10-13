@@ -412,44 +412,35 @@ void SnowpackBridge::initialize_time(
 
 Snowpack* SnowpackBridge::get_or_create_snowpack_instance(int i_grid, int j_grid,
                                                         double wrf_lat, double wrf_lon, double wrf_alt) {
-    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    const std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" +
+                                    std::to_string(i_grid) + "_" + std::to_string(j_grid);
 
-    {
-        std::lock_guard<std::mutex> lock(station_mutex_);
-        auto it = grid_snowpack_instances_.find(station_key);
-        if (it != grid_snowpack_instances_.end()) {
-            return it->second.get();
-        }
+    std::lock_guard<std::mutex> lock(station_mutex_);
+    auto it = grid_snowpack_instances_.find(station_key);
+    if (it != grid_snowpack_instances_.end()) {
+        return it->second.get();
     }
 
     auto snowpack = std::unique_ptr<Snowpack>(new Snowpack(*config_));
     Snowpack* snowpack_ptr = snowpack.get();
-
-    {
-        std::lock_guard<std::mutex> lock(station_mutex_);
-        auto insert_result = grid_snowpack_instances_.emplace(station_key, std::move(snowpack));
-        if (!insert_result.second) {
-            snowpack_ptr = insert_result.first->second.get();
-        }
-    }
-
+    grid_snowpack_instances_[station_key] = std::move(snowpack);
     return snowpack_ptr;
 }
 
 SnowStation* SnowpackBridge::get_or_create_snowstation(
     int i_grid, int j_grid, int wrf_domain_id, double wrf_lat, double wrf_lon, double wrf_alt
 ) {
-    std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_" + std::to_string(wrf_domain_id) + "_" + std::to_string(i_grid) + "_" + std::to_string(j_grid);
+    const std::string station_key = SnowpackConstants::STATION_ID_PREFIX + "_" +
+                                    std::to_string(wrf_domain_id) + "_" +
+                                    std::to_string(i_grid) + "_" + std::to_string(j_grid);
     bool use_canopy = false;
     bool use_soil = false;
 
-    // Check if SnowStation already exists for this grid point
-    {
-        std::lock_guard<std::mutex> lock(station_mutex_);
-        auto station_it = grid_snowstations_.find(station_key);
-        if (station_it != grid_snowstations_.end()) {
-            return station_it->second.get();
-        }
+    std::lock_guard<std::mutex> lock(station_mutex_);
+
+    auto station_it = grid_snowstations_.find(station_key);
+    if (station_it != grid_snowstations_.end()) {
+        return station_it->second.get();
     }
 
     // Create new SnowStation for this grid point - read configuration for correct parameters
@@ -483,59 +474,48 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(
     // Try to load existing .sno file state (CRYOWRF pattern)
     bool loaded_from_file = false;
     if (io_) {
-        // CRYOWRF C++ naming pattern: snpack_{grid_id}_{I}_{J}.sno (from Coupler.cpp line 613)
-        std::string sno_filename = "snpack_" + std::to_string(wrf_domain_id) + "_" + std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
-
-        // printf("SNOWPACK-INIT [%d,%d]: Attempting to load .sno file: %s\n", i_grid, j_grid, sno_filename.c_str());
-
+        const std::string sno_filename = "snpack_" + std::to_string(wrf_domain_id) + "_" +
+                                         std::to_string(i_grid) + "_" + std::to_string(j_grid) + ".sno";
         try {
-            // Attempt to read existing snowpack state
             SN_SNOWSOIL_DATA ssdata;
             ZwischenData zdata;
             mio::Date profile_date;
 
-            // printf("SNOWPACK-INIT [%d,%d]: Calling readSnowCover()...\n", i_grid, j_grid);
+            std::lock_guard<std::mutex> io_lock(io_mutex_);
             io_->readSnowCover(sno_filename, stationID, ssdata, zdata, false);
-            // printf("SNOWPACK-INIT [%d,%d]: readSnowCover() returned %zu layers\n", i_grid, j_grid, ssdata.nLayers);
 
-            ssdata.meta.position = position;        // Set position with coordinates from WRF
-            ssdata.meta.stationID = stationID;      // Set station ID
-            ssdata.meta.stationName = stationName;  // Set station name
-            new_station->initialize(ssdata, 0);     // Initialize SnowStation from SN_SNOWSOIL_DATA
+            ssdata.meta.position = position;
+            ssdata.meta.stationID = stationID;
+            ssdata.meta.stationName = stationName;
+            new_station->initialize(ssdata, 0);
 
-            // Ensure proper initialization of layer properties
             for (size_t e = 0; e < new_station->getNumberOfElements(); e++) {
-                // Ensure k and c vectors have proper size (3 elements: TEMPERATURE, SEEPAGE, SETTLEMENT)
                 if (new_station->Edata[e].k.size() < 3) {
-                    new_station->Edata[e].k.resize(3, 0.0);  // Resize and initialize to 0
+                    new_station->Edata[e].k.resize(3, 0.0);
                 }
                 if (new_station->Edata[e].c.size() < 3) {
-                    new_station->Edata[e].c.resize(3, 0.0);  // Resize and initialize to 0
+                    new_station->Edata[e].c.resize(3, 0.0);
                 }
 
-                // Force initialize to 0.0 if NaN or uninitialized
-                for (size_t i = 0; i < 3; i++) {
-                    if (std::isnan(new_station->Edata[e].k[i]) || new_station->Edata[e].k[i] != new_station->Edata[e].k[i]) {
-                        new_station->Edata[e].k[i] = 0.0;
+                for (size_t idx = 0; idx < 3; idx++) {
+                    if (std::isnan(new_station->Edata[e].k[idx]) || new_station->Edata[e].k[idx] != new_station->Edata[e].k[idx]) {
+                        new_station->Edata[e].k[idx] = 0.0;
                     }
-                    if (std::isnan(new_station->Edata[e].c[i]) || new_station->Edata[e].c[i] != new_station->Edata[e].c[i]) {
-                        new_station->Edata[e].c[i] = 0.0;
+                    if (std::isnan(new_station->Edata[e].c[idx]) || new_station->Edata[e].c[idx] != new_station->Edata[e].c[idx]) {
+                        new_station->Edata[e].c[idx] = 0.0;
                     }
                 }
 
-                // Recompute heat capacity (c[TEMPERATURE]) from layer properties
                 new_station->Edata[e].heatCapacity();
             }
 
             loaded_from_file = true;
-            // printf("SNOWPACK-INIT [%d,%d]: Successfully loaded station state from %s\n", i_grid, j_grid, sno_filename.c_str());
 
         } catch (const std::exception& e) {
-            // No existing state file - start with fresh snowpack
-            // Only show first few initialization failures to avoid spam
             static int init_failure_count = 0;
             if (init_failure_count < 5) {
-                printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh\n", i_grid, j_grid);
+                printf("SNOWPACK-INFO: No existing state for grid (%d,%d), starting fresh (%s)\n",
+                       i_grid, j_grid, e.what());
                 init_failure_count++;
             }
         }
@@ -547,17 +527,8 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(
         printf("SNOWPACK-INFO: Fresh SnowStation created for grid (%d,%d)\n", i_grid, j_grid);
     }
 
-    // Store the new SnowStation
     SnowStation* station_ptr = new_station.get();
-
-    {
-        std::lock_guard<std::mutex> lock(station_mutex_);
-        auto insert_result = grid_snowstations_.emplace(station_key, std::move(new_station));
-        if (!insert_result.second) {
-            station_ptr = insert_result.first->second.get();
-        }
-    }
-
+    grid_snowstations_[station_key] = std::move(new_station);
     return station_ptr;
 }
 
@@ -589,7 +560,7 @@ void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
 
     if (station_ptr) {
         try {
-            // Use correct SNOWPACK API
+            std::lock_guard<std::mutex> io_lock(io_mutex_);
             ZwischenData zdata;  // Empty for basic usage
             io_->writeSnowCover(current_simulation_date_, *station_ptr, zdata, true);
         } catch (const std::exception& e) {
@@ -618,8 +589,11 @@ void SnowpackBridge::save_all_snowpack_states() {
     for (const auto& entry : stations_snapshot) {
         const std::string& key = entry.first;
         SnowStation* station = entry.second;
+        if (!station) {
+            continue;
+        }
         try {
-            // Use correct SNOWPACK API
+            std::lock_guard<std::mutex> io_lock(io_mutex_);
             ZwischenData zdata;  // Empty for basic usage
             io_->writeSnowCover(current_simulation_date_, *station, zdata, true);
             saved_count++;
@@ -637,6 +611,7 @@ void SnowpackBridge::execute_snowpack(
     SnowpackLayerData* layer_data,
     BudgetData* budget_data
 ) {
+    static std::atomic<int> debug_trace_counter(40);
     // Validate grid coordinates first
     if (input.i_grid < 0 || input.i_grid > 10000 || input.j_grid < 0 || input.j_grid > 10000) {
         printf("SNOWPACK-ERROR: Invalid grid coordinates (%d,%d) - outside expected range [0-10000]\n",
@@ -670,6 +645,18 @@ void SnowpackBridge::execute_snowpack(
         // 1. Get/create persistent SNOWPACK objects (singleton pattern only)
         auto objects = SnowpackObjects::create_station_objects(input, *this);
 
+        int trace_remaining = debug_trace_counter.load(std::memory_order_relaxed);
+        if (trace_remaining > 0) {
+            if (debug_trace_counter.compare_exchange_strong(trace_remaining, trace_remaining - 1, std::memory_order_relaxed)) {
+                printf("SNOWPACK-TRACE [%d,%d]: tid=%lu station=%p snowpack=%p call=%d\n",
+                       input.i_grid, input.j_grid,
+                       static_cast<unsigned long>(pthread_self()),
+                       (void*)objects.station,
+                       (void*)objects.instance,
+                       execute_call_count_.load());
+            }
+        }
+
         // 2. Ensure station is properly initialized (load from file or create fresh)
         SnowpackObjects::ensure_station_initialized(objects.station, input, *this);
 
@@ -682,6 +669,13 @@ void SnowpackBridge::execute_snowpack(
         auto Mdata = std::unique_ptr<CurrentMeteo>(new CurrentMeteo());
         double current_snow_depth = (execute_call_count_ > 1) ? objects.station->cH : 0.0;
         SnowpackUtils::prepare_meteo_data(input, *Mdata, current_simulation_date_, current_snow_depth, config_.get());
+        int trace_after_prepare = debug_trace_counter.load(std::memory_order_relaxed);
+        if (trace_after_prepare > 0 && execute_call_count_.load() <= 5) {
+            printf("SNOWPACK-TRACE prepare [%d,%d]: tid=%lu ta=%.2f wind=%.2f rh=%.3f dt=%.1f\n",
+                   input.i_grid, input.j_grid,
+                   static_cast<unsigned long>(pthread_self()),
+                   Mdata->ta, Mdata->vw, Mdata->rh, input.dt);
+        }
 
         // 5. Create surface fluxes and boundary condition objects
         auto surfFluxes = std::unique_ptr<SurfaceFluxes>(new SurfaceFluxes());
@@ -711,6 +705,15 @@ void SnowpackBridge::execute_snowpack(
         if (budget_data) {
             SnowpackUtils::extract_budget_data(*surfFluxes, *sn_Bdata, cumu_precip, input, *budget_data);
             budget_data->mass_swe = output.snow_swe;  // Ensure consistency
+        }
+
+        if (execute_call_count_.load() <= 5) {
+            printf("SNOWPACK-TRACE output [%d,%d]: tid=%lu Tsurf=%.2f SWE=%.2f depth=%.2f HFX=%.2f QFX=%.6f\n",
+                   input.i_grid, input.j_grid,
+                   static_cast<unsigned long>(pthread_self()),
+                   output.surface_temp, output.snow_swe,
+                   output.snow_depth, output.heat_flux_sensible,
+                   output.heat_flux_latent);
         }
 
         // 11. Validate outputs
