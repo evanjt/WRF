@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -50,11 +51,21 @@ private:
     std::unique_ptr<SnowpackIO> io_;
     std::atomic<bool> config_initialized_{false};
     std::string config_file_path_;
+    mutable std::mutex config_mutex_;
 
     // Time management
     mio::Date current_simulation_date_;
+    mio::Date simulation_start_date_;
     std::atomic<bool> time_initialized_{false};
     double calculation_step_length_ = 0.0;
+    struct StationTimeState {
+        mio::Date current_time;
+        int call_counter = 0;
+        bool initialized = false;
+        double last_height_m = -1.0;
+    };
+    std::unordered_map<std::string, StationTimeState> station_time_state_;
+    mutable std::mutex time_mutex_;
 
     // Persistent object storage per grid point
     std::map<std::string, std::unique_ptr<SnowStation>> grid_snowstations_;
@@ -124,6 +135,7 @@ void prepare_meteo_data(const MeteoInput& input,
 void extract_surface_outputs(const SnowStation& station,
                              const SurfaceFluxes& fluxes,
                              const BoundCond& bc,
+                             const CurrentMeteo& meteo,
                              SnowpackOutput& output,
                              double temp_air_fallback);
 
@@ -134,10 +146,6 @@ void extract_budget_data(const SurfaceFluxes& fluxes,
                         double cumu_precip,
                         const MeteoInput& input,
                         BudgetData& budget_data);
-
-void advance_simulation_time(const MeteoInput& input,
-                           mio::Date& current_time,
-                           double calculation_step_length);
 
 SnowpackBridgeObjects create_station_objects(const MeteoInput& input,
                                            SnowpackBridge& bridge);
@@ -171,10 +179,8 @@ namespace SnowpackObjects {
 }
 
 namespace SnowpackUtils {
-    void advance_simulation_time(const MeteoInput& input, mio::Date& current_time, double calculation_step_length);
     void prepare_meteo_data(const MeteoInput& input, CurrentMeteo& Mdata, const mio::Date& current_time, double current_snow_depth, const SnowpackConfig* config);
-    void extract_surface_outputs(const SnowStation& station, const SurfaceFluxes& fluxes, const BoundCond& bc, SnowpackOutput& output, double temp_air);
+    void extract_surface_outputs(const SnowStation& station, const SurfaceFluxes& fluxes, const BoundCond& bc, const CurrentMeteo& meteo, SnowpackOutput& output, double temp_air);
     void extract_layer_data(const SnowStation& station, SnowpackLayerData& layer_data);
     void extract_budget_data(const SurfaceFluxes& fluxes, const BoundCond& bc, double cumu_precip, const MeteoInput& input, BudgetData& budget);
-    void reset_time_manager();
 }

@@ -20,26 +20,30 @@ struct MeteoInput {
 };
 
 struct SnowpackOutput {
-    double snow_swe;
-    double snow_depth;
-    double surface_temp;
-    double heat_flux_sensible;
-    double heat_flux_latent;
-    double albedo;
-    double snow_coverage;
-    double friction_velocity;
-    double stability_param;
+    double snow_swe = 0.0;
+    double snow_depth = 0.0;
+    double surface_temp = 0.0;
+    double heat_flux_sensible = 0.0;
+    double heat_flux_latent = 0.0;
+    double albedo = 0.0;
+    double snow_coverage = 0.0;
+    double friction_velocity = 0.0;
+    double stability_param = 0.0;
+    double roughness_mom = 0.0;
+    double roughness_heat = 0.0;
+    double latent_flux_kg = 0.0;
+    double moisture_flux = 0.0;
 
     // Soil properties from SNOWPACK ground interface
     // CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 updates soil moisture
-    double soil_moisture_volumetric;  // phiSoil from SNOWPACK [%]
-    double soil_temperature;          // ts0 from SNOWPACK [K]
-    double soil_density;              // SoilRho from SNOWPACK [kg/m³]
-    double soil_conductivity;         // SoilK from SNOWPACK
-    double soil_heat_capacity;        // SoilC from SNOWPACK
-    double soil_moisture_liquid;      // Calculated liquid fraction
-    double soil_moisture_avail;       // Calculated availability [0-1]
-    double soil_moisture_total;       // Calculated total water [mm]
+    double soil_moisture_volumetric = 0.0;  // phiSoil from SNOWPACK [%]
+    double soil_temperature = 273.15;       // ts0 from SNOWPACK [K]
+    double soil_density = 0.0;              // SoilRho from SNOWPACK [kg/m³]
+    double soil_conductivity = 0.0;         // SoilK from SNOWPACK
+    double soil_heat_capacity = 0.0;        // SoilC from SNOWPACK
+    double soil_moisture_liquid = 0.0;      // Calculated liquid fraction
+    double soil_moisture_avail = 0.0;       // Calculated availability [0-1]
+    double soil_moisture_total = 0.0;       // Calculated total water [mm]
 };
 
 struct SnowpackLayerData {

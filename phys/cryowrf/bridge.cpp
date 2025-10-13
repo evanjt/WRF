@@ -15,6 +15,7 @@
 #include <vector>
 #include <fstream>
 #include <algorithm>
+#include <sstream>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
@@ -28,33 +29,6 @@
 
 
 namespace SnowpackUtils {
-// Initialize time step management following CRYOWRF pattern
-void initialize_time_step_internal(const MeteoInput& input,
-                                   mio::Date& current_time,
-                                   double calculation_step_length,
-                                   int& call_counter,
-                                   int& compute_counter,
-                                   bool& first_call) {
-
-    if (first_call) {
-        double wrf_dt = input.dt;  // WRF timestep in seconds
-        double snowpack_dt = calculation_step_length * 60.0;  // SNOWPACK timestep in seconds
-
-        // WRF calls physics every wrf_dt, SNOWPACK needs to run every snowpack_dt
-        // So we run SNOWPACK every (wrf_dt/snowpack_dt) WRF calls
-        compute_counter = (int)(wrf_dt / snowpack_dt);
-        first_call = false;
-    }
-
-    call_counter++;
-
-    // Only advance time when counter matches (CRYOWRF pattern)
-    if (compute_counter > 0 && (call_counter % compute_counter) == 0) {
-        current_time += (calculation_step_length / 1440.0);  // Convert minutes to days
-    }
-}
-
-
 void prepare_meteo_data(const MeteoInput& input,
                         CurrentMeteo& Mdata,
                         const mio::Date& current_time,
@@ -62,37 +36,30 @@ void prepare_meteo_data(const MeteoInput& input,
                         const SnowpackConfig* config) {
 
     // Temperature sanity check
-    double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN,
+    const double safe_temp = std::max(SnowpackConstants::T_CRAZY_MIN_KELVIN,
                                std::min(input.temp_air, SnowpackConstants::T_CRAZY_MAX_KELVIN));
+    const double safe_rh = std::max(0.01, std::min(1.0, input.humidity));
+    const double safe_wind = std::max(0.0, input.wind_speed);
 
     // Fill meteorological data structure using correct SNOWPACK API
     Mdata.date = current_time;
     Mdata.ta = safe_temp;                                       // Air temperature [K]
-    Mdata.rh = std::max(0.01, std::min(1.0, input.humidity));   // Relative humidity [0-1]
-    Mdata.vw = std::max(0.1, input.wind_speed);                 // Wind speed [m/s]
+    Mdata.rh = safe_rh;                                         // Relative humidity [0-1]
+    Mdata.rh_avg = safe_rh;
+    Mdata.vw = safe_wind;                                       // Wind speed [m/s]
+    Mdata.vw_avg = safe_wind;
+    Mdata.vw_max = safe_wind;                                   // CRYOWRF src/coupler/main_coupler/Coupler.cpp:907
     Mdata.dw = input.wind_dir;                                  // Wind direction [degrees]
+    Mdata.dw_drift = input.wind_dir;
+    Mdata.vw_drift = safe_wind;
     Mdata.iswr = std::max(0.0, input.shortwave_in);             // Incoming shortwave [W/m²]
-    Mdata.lw_net = std::max(0.0, input.longwave_in);            // Net longwave radiation [W/m²]
+    Mdata.lw_net = input.longwave_in;                           // Net longwave surrogate (no ilwr_v in vendored Snowpack)
     Mdata.psum = std::max(0.0, input.precipitation);            // Precipitation [mm]
-
-    // Calculate atmospheric emissivity using approximation (Stull 1988)
-    // CRYOWRF SOURCE: Derived from atmospheric emissivity patterns in CRYOWRF coupler
-    double atmospheric_emissivity = 0.7 + 5.95e-5 * input.pressure * exp(1500.0 * input.humidity / safe_temp);
-    Mdata.ea = std::max(0.6, std::min(1.0, atmospheric_emissivity));  // Atmospheric emissivity [dimensionless]
-
-    // Set ground temperature (CRYOWRF compatibility)
-    // CRYOWRF SOURCE: ./CRYOWRF/src/coupler/main_coupler/Coupler.cpp - vecMyMeteo(MeteoData::TSG) = 400.00
-    Mdata.ts0 = 400.0;  // Set ground temperature [K] (CRYOWRF pattern - fixed 400K ground temp)
-
-    // Set maximum wind speed (CRYOWRF compatibility)
-    // CRYOWRF SOURCE: ./CRYOWRF/src/coupler/main_coupler/Coupler.cpp - vecMyMeteo(MeteoData::VW_MAX) = l_VW_MAX
-    Mdata.vw_max = input.wind_speed;  // Set max wind speed [m/s] (CRYOWRF pattern - track max wind)
-
-    // Additional required meteorological parameters
-    Mdata.psum_ph = (safe_temp < SnowpackConstants::PRECIP_PHASE_THRESHOLD_K) ? 0.0 : 1.0;  // Precipitation phase (0=snow, 1=rain)
-    Mdata.tss = mio::IOUtils::nodata;                         // Surface temperature (let SNOWPACK compute)
-    Mdata.ts0 = safe_temp - SnowpackConstants::BOTTOM_TEMP_OFFSET_K;  // Bottom temperature estimate
-    Mdata.hs = current_snow_depth;                            // Current snow height [m]
+    Mdata.psum_ph = (safe_temp < SnowpackConstants::PRECIP_PHASE_THRESHOLD_K) ? 0.0 : 1.0;  // CRYOWRF src/coupler/main_coupler/Coupler.cpp:921
+    Mdata.ea = std::max(0.6, std::min(1.0, 0.7 + 5.95e-5 * input.pressure * std::exp(1500.0 * safe_rh / safe_temp)));  // Coupler atmospheric emissivity heuristic
+    Mdata.tss = mio::IOUtils::nodata;                           // Let SNOWPACK solve for surface temperature
+    Mdata.ts0 = 400.0;                                          // CRYOWRF src/coupler/main_coupler/Coupler.cpp:909 (TSG=400K)
+    Mdata.hs = std::max(0.0, current_snow_depth);               // Current snow depth [m]
 
     // Set roughness length and friction velocity for wind pumping calculations
     // Without these, wind pumping produces NaN thermal conductivity
@@ -115,16 +82,21 @@ void prepare_meteo_data(const MeteoInput& input,
     const double von_karman = 0.4;  // Physical constant - matches CRYOWRF implementation
     const double z_wind = input.height;   // Measurement height [m]
 
-    Mdata.ustar = (z_wind > Mdata.z0) ?
-                  (von_karman * Mdata.vw / std::log(z_wind / Mdata.z0)) :
-                  (0.1 * Mdata.vw);  // Fallback if z <= z0
+    double log_argument = (z_wind > Mdata.z0) ? std::log(std::max(1.01, z_wind / Mdata.z0)) : 0.0;
+    if (log_argument <= 0.0) {
+        log_argument = 1.0;
+    }
+    Mdata.ustar = (z_wind > Mdata.z0) ? (von_karman * std::max(0.0, Mdata.vw) / log_argument)
+                                      : 0.1 * std::max(0.0, Mdata.vw);  // Fallback if z <= z0
+
+    const double rd = 287.05;  // Dry air gas constant [J/(kg K)]
 
     // Validate critical parameters that could cause crashes
     if (std::isnan(Mdata.ustar) || std::isinf(Mdata.ustar)) {
         printf("SNOWPACK-FATAL [%d,%d]: ustar is NaN/Inf (%.6f)! This will crash SNOWPACK!\n",
                input.i_grid, input.j_grid, Mdata.ustar);
         printf("SNOWPACK-FATAL [%d,%d]: z_wind=%.6f, z0=%.6f, log(z/z0)=%.6f\n",
-               input.i_grid, input.j_grid, z_wind, Mdata.z0, std::log(z_wind / Mdata.z0));
+               input.i_grid, input.j_grid, z_wind, Mdata.z0, log_argument);
         std::abort();
     }
     if (std::isnan(Mdata.z0) || std::isinf(Mdata.z0) || Mdata.z0 <= 0.0) {
@@ -137,8 +109,16 @@ void prepare_meteo_data(const MeteoInput& input,
 void extract_surface_outputs(const SnowStation& station,
                              const SurfaceFluxes& fluxes,
                              const BoundCond& bc,
+                             const CurrentMeteo& meteo,
                              SnowpackOutput& output,
                              double temp_air_fallback) {
+
+    output.latent_flux_kg = 0.0;
+    output.moisture_flux = 0.0;
+    output.roughness_mom = std::max(1.0e-4, meteo.z0);
+    output.roughness_heat = output.roughness_mom;
+    output.friction_velocity = std::max(0.0, meteo.ustar);
+    output.stability_param = meteo.psi_s;
 
     try {
         size_t ndata_size = station.Ndata.size();
@@ -146,12 +126,10 @@ void extract_surface_outputs(const SnowStation& station,
         output.snow_swe = station.swe;                      // Snow water equivalent [mm]
         output.snow_depth = station.cH - station.Ground;    // Snow height [m] (CRYOWRF line 1129)
         output.heat_flux_sensible = -1.0 * fluxes.qs;       // Negative sign for WRF convention (CRYOWRF line 1123)
-        output.heat_flux_latent = -1.0 * bc.ql;             // Use boundary condition data (CRYOWRF line 1124)
+        const double latent_flux_w = -1.0 * bc.ql;          // Use boundary condition data (CRYOWRF line 1124)
+        output.heat_flux_latent = latent_flux_w;
         output.albedo = station.Albedo;
         output.snow_coverage = 1.0;                         // Hardcoded to 1.0 following CRYOWRF pattern (line 1127)
-        output.friction_velocity = 0.0;                     // Will be set from meteo data
-        output.stability_param = 0.0;                       // Will be calculated if needed
-
         // Extract soil properties from SNOWPACK ground interface elements
         // SNOWPACK has full soil physics - this is why we use it instead of NoahMP
         // CRYOWRF: module_sf_snowpacklsm.F:364-366 should extract SNOWPACK soil data
@@ -247,6 +225,15 @@ void extract_surface_outputs(const SnowStation& station,
         output.soil_moisture_total = std::max(0.0, output.soil_moisture_total);
         output.soil_temperature = std::max(150.0, std::min(350.0, output.soil_temperature)); // Reasonable temp range
 
+        // Convert latent heat flux to mass flux (kg m-2 s-1) following CRYOWRF convention
+        const double latent_heat = (output.surface_temp > 273.15) ? 2.5104e6 : 2.8440e6;
+        if (std::isfinite(latent_flux_w)) {
+            output.latent_flux_kg = latent_flux_w / latent_heat;
+        } else {
+            output.latent_flux_kg = 0.0;
+        }
+        output.moisture_flux = output.latent_flux_kg;
+
         // Consistency check
         if (output.snow_depth > 0.001 && output.snow_swe <= 0.0) {
             // Use fallback density
@@ -334,41 +321,6 @@ void extract_budget_data(const SurfaceFluxes& fluxes,
     }
 }
 
-// Time management class for better organization
-class TimeManager {
-private:
-    int call_counter_ = 0;
-    int compute_counter_ = 0;
-    bool first_call_ = true;
-    std::mutex mutex_;
-
-public:
-    void advance_time(const MeteoInput& input, mio::Date& current_time, double calculation_step_length) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        initialize_time_step_internal(input, current_time, calculation_step_length,
-                                      call_counter_, compute_counter_, first_call_);
-    }
-
-    void reset() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        call_counter_ = 0;
-        compute_counter_ = 0;
-        first_call_ = true;
-    }
-};
-
-
-// Global time manager instance
-static TimeManager g_time_manager;
-
-void advance_simulation_time(const MeteoInput& input, mio::Date& current_time, double calculation_step_length) {
-        g_time_manager.advance_time(input, current_time, calculation_step_length);
-}
-
-void reset_time_manager() {
-        g_time_manager.reset();
-}
-
 }
 void SnowpackBridge::initialize_time(
     int start_year,
@@ -389,10 +341,15 @@ void SnowpackBridge::initialize_time(
         try {
             current_simulation_date_ = mio::Date(start_year, start_month, start_day,
                                                  start_hour, start_minute, 0.0, 0.0);
+            simulation_start_date_ = current_simulation_date_;
+
+            {
+                std::lock_guard<std::mutex> guard(time_mutex_);
+                station_time_state_.clear();
+            }
 
             // Get calculation step length from configuration (in minutes)
             calculation_step_length_ = config_->get("CALCULATION_STEP_LENGTH", "Snowpack");
-            SnowpackUtils::reset_time_manager();
             time_initialized_.store(true, std::memory_order_release);
 
             printf("SNOWPACK-INFO: Time initialized to %04d-%02d-%02d %02d:%02d\n",
@@ -559,10 +516,18 @@ void SnowpackBridge::save_snowstation_state(int i_grid, int j_grid) {
     }
 
     if (station_ptr) {
+        mio::Date snapshot_time = simulation_start_date_;
+        {
+            std::lock_guard<std::mutex> time_lock(time_mutex_);
+            auto ts_it = station_time_state_.find(station_key);
+            if (ts_it != station_time_state_.end() && ts_it->second.initialized) {
+                snapshot_time = ts_it->second.current_time;
+            }
+        }
         try {
             std::lock_guard<std::mutex> io_lock(io_mutex_);
             ZwischenData zdata;  // Empty for basic usage
-            io_->writeSnowCover(current_simulation_date_, *station_ptr, zdata, true);
+            io_->writeSnowCover(snapshot_time, *station_ptr, zdata, true);
         } catch (const std::exception& e) {
             printf("SNOWPACK-ERROR: Failed to save state for grid (%d,%d): %s\n",
                    i_grid, j_grid, e.what());
@@ -593,9 +558,17 @@ void SnowpackBridge::save_all_snowpack_states() {
             continue;
         }
         try {
+            mio::Date snapshot_time = simulation_start_date_;
+            {
+                std::lock_guard<std::mutex> time_lock(time_mutex_);
+                auto ts_it = station_time_state_.find(key);
+                if (ts_it != station_time_state_.end() && ts_it->second.initialized) {
+                    snapshot_time = ts_it->second.current_time;
+                }
+            }
             std::lock_guard<std::mutex> io_lock(io_mutex_);
             ZwischenData zdata;  // Empty for basic usage
-            io_->writeSnowCover(current_simulation_date_, *station, zdata, true);
+            io_->writeSnowCover(snapshot_time, *station, zdata, true);
             saved_count++;
         } catch (const std::exception& e) {
             printf("SNOWPACK-ERROR: Failed to save state for %s: %s\n", key.c_str(), e.what());
@@ -645,6 +618,11 @@ void SnowpackBridge::execute_snowpack(
         // 1. Get/create persistent SNOWPACK objects (singleton pattern only)
         auto objects = SnowpackObjects::create_station_objects(input, *this);
 
+        if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+            printf("SNOWPACK-TRACE exec-start [%d,%d]\n", input.i_grid, input.j_grid);
+            fflush(stdout);
+        }
+
         int trace_remaining = debug_trace_counter.load(std::memory_order_relaxed);
         if (trace_remaining > 0) {
             if (debug_trace_counter.compare_exchange_strong(trace_remaining, trace_remaining - 1, std::memory_order_relaxed)) {
@@ -660,21 +638,73 @@ void SnowpackBridge::execute_snowpack(
         // 2. Ensure station is properly initialized (load from file or create fresh)
         SnowpackObjects::ensure_station_initialized(objects.station, input, *this);
 
-        // 3. Advance simulation time following CRYOWRF pattern
-        SnowpackUtils::advance_simulation_time(input, current_simulation_date_, calculation_step_length_);
+        // 3. Advance simulation time following CRYOWRF per-station counter pattern
+        const std::string time_key = SnowpackConstants::STATION_ID_PREFIX + "_1_" +
+                                     std::to_string(input.i_grid) + "_" + std::to_string(input.j_grid);
+        const double measured_height = std::max(1.0, input.height);
+        bool height_changed = false;
+        StationTimeState station_time_snapshot;
+        {
+            std::lock_guard<std::mutex> time_lock(time_mutex_);
+            StationTimeState& state = station_time_state_[time_key];
+            if (!state.initialized) {
+                state.current_time = simulation_start_date_;
+                state.call_counter = 0;
+                state.initialized = true;
+                state.last_height_m = measured_height;
+                height_changed = true;
+            }
 
-        // Time advancement logging removed to avoid verbosity
+            state.call_counter += 1;
+            const double dt_seconds = (input.dt > 0.0) ? input.dt : calculation_step_length_ * 60.0;
+            const double dt_days = dt_seconds / 86400.0;
+            state.current_time += dt_days;
+            if (!height_changed && std::abs(state.last_height_m - measured_height) > 1.0e-6) {
+                state.last_height_m = measured_height;
+                height_changed = true;
+            }
+            station_time_snapshot = state;
+        }
+
+        current_simulation_date_ = station_time_snapshot.current_time;
+
+        if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+            printf("SNOWPACK-TRACE exec-time [%d,%d]: julian=%.6f height=%.3f\n",
+                   input.i_grid, input.j_grid,
+                   station_time_snapshot.current_time.getJulian(), measured_height);
+            fflush(stdout);
+        }
+
+        if (height_changed && config_) {
+            // CRYOWRF src/coupler/main_coupler/Coupler.cpp:832-858 updates HEIGHT_OF_METEO_VALUES each call
+            try {
+                std::lock_guard<std::mutex> config_lock(config_mutex_);
+                std::ostringstream height_stream;
+                height_stream.setf(std::ios::fixed);
+                height_stream.precision(6);
+                height_stream << measured_height;
+                config_->deleteKey("HEIGHT_OF_WIND_VALUE", "Snowpack");
+                config_->deleteKey("HEIGHT_OF_METEO_VALUES", "Snowpack");
+                const std::string height_value = height_stream.str();
+                config_->addKey("HEIGHT_OF_WIND_VALUE", "Snowpack", height_value);
+                config_->addKey("HEIGHT_OF_METEO_VALUES", "Snowpack", height_value);
+            } catch (const std::exception& e) {
+                printf("SNOWPACK-WARNING [%d,%d]: Unable to update HEIGHT_OF_METEO_VALUES: %s\n",
+                       input.i_grid, input.j_grid, e.what());
+            }
+        }
 
         // 4. Prepare meteorological data using utility function
         auto Mdata = std::unique_ptr<CurrentMeteo>(new CurrentMeteo());
         double current_snow_depth = (execute_call_count_ > 1) ? objects.station->cH : 0.0;
-        SnowpackUtils::prepare_meteo_data(input, *Mdata, current_simulation_date_, current_snow_depth, config_.get());
+        SnowpackUtils::prepare_meteo_data(input, *Mdata, station_time_snapshot.current_time, current_snow_depth, config_.get());
         int trace_after_prepare = debug_trace_counter.load(std::memory_order_relaxed);
         if (trace_after_prepare > 0 && execute_call_count_.load() <= 20) {
-            printf("SNOWPACK-TRACE prepare [%d,%d]: tid=%lu ta=%.2f wind=%.2f rh=%.3f dt=%.1f\n",
+            printf("SNOWPACK-TRACE prepare [%d,%d]: tid=%lu ta=%.2f wind=%.2f rh=%.3f dt=%.1f u*=%.3f z0=%.4f\n",
                    input.i_grid, input.j_grid,
                    static_cast<unsigned long>(pthread_self()),
-                   Mdata->ta, Mdata->vw, Mdata->rh, input.dt);
+                   Mdata->ta, Mdata->vw, Mdata->rh, input.dt, Mdata->ustar, Mdata->z0);
+            fflush(stdout);
         }
 
         // 5. Create surface fluxes and boundary condition objects
@@ -685,6 +715,12 @@ void SnowpackBridge::execute_snowpack(
         double cumu_precip = 0.0;
         objects.instance->runSnowpackModel(*Mdata, *objects.station, cumu_precip, *sn_Bdata, *surfFluxes);
 
+        if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+            printf("SNOWPACK-TRACE exec-run [%d,%d]: completed Snowpack core\n",
+                   input.i_grid, input.j_grid);
+            fflush(stdout);
+        }
+
         // 7. Collect surface fluxes (CRYOWRF pattern - line 1078 in original)
         try {
             surfFluxes->collectSurfaceFluxes(*sn_Bdata, *objects.station, *Mdata);
@@ -694,7 +730,7 @@ void SnowpackBridge::execute_snowpack(
         }
 
         // 8. Extract surface outputs using utility function (CRYOWRF pattern - lines 1121-1130)
-        SnowpackUtils::extract_surface_outputs(*objects.station, *surfFluxes, *sn_Bdata, output, input.temp_air);
+        SnowpackUtils::extract_surface_outputs(*objects.station, *surfFluxes, *sn_Bdata, *Mdata, output, input.temp_air);
 
         // 9. Extract detailed layer data if requested (CRYOWRF pattern - lines 1153-1185)
         if (layer_data) {
@@ -714,6 +750,7 @@ void SnowpackBridge::execute_snowpack(
                    output.surface_temp, output.snow_swe,
                    output.snow_depth, output.heat_flux_sensible,
                    output.heat_flux_latent);
+            fflush(stdout);
         }
 
         // 11. Validate outputs
@@ -747,6 +784,10 @@ void SnowpackBridge::execute_snowpack(
         output.soil_moisture_liquid = 0.0;
         output.soil_moisture_avail = 0.0;
         output.soil_moisture_total = 0.0;
+        output.roughness_mom = 0.002;
+        output.roughness_heat = 0.002;
+        output.latent_flux_kg = 0.0;
+        output.moisture_flux = 0.0;
 
         if (layer_data) {
             layer_data->n_layers = 0;

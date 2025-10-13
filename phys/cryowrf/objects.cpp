@@ -247,6 +247,22 @@ void validate_output_values(const SnowpackOutput& output, int i_grid, int j_grid
         printf("SNOWPACK-FATAL [%d,%d]: snow_depth is NaN/Inf (%.6f)!\n", i_grid, j_grid, output.snow_depth);
         std::abort();
     }
+    if (std::isnan(output.friction_velocity) || std::isinf(output.friction_velocity)) {
+        printf("SNOWPACK-FATAL [%d,%d]: friction_velocity is NaN/Inf (%.6f)!\n", i_grid, j_grid, output.friction_velocity);
+        std::abort();
+    }
+    if (output.roughness_mom <= 0.0 || std::isnan(output.roughness_mom) || std::isinf(output.roughness_mom)) {
+        printf("SNOWPACK-FATAL [%d,%d]: roughness_mom invalid (%.6f)!\n", i_grid, j_grid, output.roughness_mom);
+        std::abort();
+    }
+    if (output.roughness_heat <= 0.0 || std::isnan(output.roughness_heat) || std::isinf(output.roughness_heat)) {
+        printf("SNOWPACK-FATAL [%d,%d]: roughness_heat invalid (%.6f)!\n", i_grid, j_grid, output.roughness_heat);
+        std::abort();
+    }
+    if (std::isnan(output.latent_flux_kg) || std::isinf(output.latent_flux_kg)) {
+        printf("SNOWPACK-FATAL [%d,%d]: latent_flux_kg is NaN/Inf (%.6f)!\n", i_grid, j_grid, output.latent_flux_kg);
+        std::abort();
+    }
 }
 
 void validate_layer_data(const SnowpackLayerData& layer_data, int i_grid, int j_grid) {

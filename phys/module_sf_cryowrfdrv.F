@@ -11,6 +11,7 @@ MODULE module_sf_snowpackdrv
 
     ! Module-level configuration management
     LOGICAL, SAVE :: config_initialized = .false.
+    LOGICAL, SAVE :: config_logged = .false.
     CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
 
     ! Per-grid accumulation for Meteo averaging / throttling
@@ -297,12 +298,13 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     ENDIF
     
     ! Diagnostic message showing namelist parameters
-    IF (itimestep == 1) THEN
+    IF (itimestep == 1 .AND. .NOT. config_logged) THEN
         CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
         WRITE(*,'(A,L1)') 'SNOWPACK-INFO: sn_start_from_file = ', sn_start_from_file
         WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_dt = ', snpack_dt
         WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_write_dt = ', snpack_write_dt
         WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode)
+        config_logged = .TRUE.
     END IF
 
     ! Safety check: Verify loop bounds are reasonable
@@ -370,7 +372,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         rain_total = acc_rain(I,J)
 
         dt_effective = dt * REAL(acc_samples(I,J))   ! aggregate WRF steps into the Snowpack physics step
-        met_height   = MAX(1.0, DZ8W(I,1,J))   ! bounded measurement height (CRYOWRF resets via HEIGHT_OF_METEO_VALUES)
+        met_height   = MAX(1.0, 0.5*DZ8W(I,1,J))   ! CRYOWRF src/wrf/phys/module_sf_snowpacklsm.F:527 uses 0.5*DZ8W
 
         ! Reset accumulators for next cycle
         acc_ta(I,J) = 0.0

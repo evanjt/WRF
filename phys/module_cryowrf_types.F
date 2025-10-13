@@ -41,6 +41,10 @@ TYPE, BIND(C) :: SnowpackOutput_C
     REAL(C_DOUBLE) :: snow_coverage
     REAL(C_DOUBLE) :: friction_velocity
     REAL(C_DOUBLE) :: stability_param
+    REAL(C_DOUBLE) :: roughness_mom
+    REAL(C_DOUBLE) :: roughness_heat
+    REAL(C_DOUBLE) :: latent_flux_kg
+    REAL(C_DOUBLE) :: moisture_flux
 
     ! Soil properties from SNOWPACK ground interface
     ! CRYOWRF SOURCE: module_sf_snowpacklsm.F:364-366 updates soil moisture
@@ -275,6 +279,10 @@ SUBROUTINE initialize_snowpack_interface(snowpack_data, itimestep, dt, dx)
     ! Initialize atmospheric variables (CRYOWRF compatibility)
     snowpack_data%surface%friction_velocity = 0.0
     snowpack_data%surface%stability_param = 0.0
+    snowpack_data%surface%roughness_mom = 0.002
+    snowpack_data%surface%roughness_heat = 0.002
+    snowpack_data%surface%heat_latent_kg = 0.0
+    snowpack_data%surface%moisture_flux = 0.0
 
     ! Initialize soil variables with defaults for interface compatibility
     ! NOTE: These values are NOT used - real SNOWPACK soil data is handled elsewhere
@@ -358,8 +366,8 @@ SUBROUTINE pack_wrf_to_interface(snowpack_data, &
     snowpack_data%surface%heat_latent = lh
     snowpack_data%surface%heat_latent_kg = qfx
     snowpack_data%surface%moisture_flux = qsfc
-    snowpack_data%surface%roughness_mom = z0
-    snowpack_data%surface%roughness_heat = znt
+    snowpack_data%surface%roughness_mom = MAX(1.0E-4, z0)
+    snowpack_data%surface%roughness_heat = MAX(1.0E-4, znt)
     
     ! Pack model configuration
     snowpack_data%config%dt = dt
@@ -463,6 +471,10 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     output_c%snow_coverage = 0.0
     output_c%friction_velocity = 0.0
     output_c%stability_param = 0.0
+    output_c%roughness_mom = 0.0
+    output_c%roughness_heat = 0.0
+    output_c%latent_flux_kg = 0.0
+    output_c%moisture_flux = 0.0
 
     layers_c%n_layers = 0
     layers_c%layer_temp = 0.0_C_DOUBLE
@@ -522,6 +534,13 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     snowpack_data%surface%snow_coverage = REAL(output_c%snow_coverage)
     snowpack_data%surface%friction_velocity = REAL(output_c%friction_velocity)
     snowpack_data%surface%stability_param = REAL(output_c%stability_param)
+    snowpack_data%surface%roughness_mom = MAX(1.0E-4, REAL(output_c%roughness_mom))
+    snowpack_data%surface%roughness_heat = MAX(1.0E-4, REAL(output_c%roughness_heat))
+    snowpack_data%surface%heat_latent_kg = REAL(output_c%latent_flux_kg)
+    snowpack_data%surface%moisture_flux = REAL(output_c%moisture_flux)
+    IF (ABS(snowpack_data%surface%moisture_flux) < 1.0E-12) THEN
+        snowpack_data%surface%moisture_flux = snowpack_data%surface%heat_latent_kg
+    END IF
 
     ! Store extracted layer data
     snowpack_data%layers%n_layers = MIN(INT(layers_c%n_layers), MAX_SNOW_LAYERS)
