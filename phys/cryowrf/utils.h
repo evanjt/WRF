@@ -1,15 +1,15 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <algorithm>
 
-#include "structs.h"
 #include "meteoio/meteoio/MeteoIO.h"
+#include "structs.h"
 
 // Forward declarations to avoid circular dependency
 namespace mio {
-  class Date;
-  class Config;
-}
+class Date;
+class Config;
+}  // namespace mio
 
 struct SnowStation;
 struct SnowpackConfig;

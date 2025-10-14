@@ -7,7 +7,7 @@
 
 // Forward declarations to minimize dependencies
 namespace mio {
-  class Config;
+class Config;
 }
 
 struct SnowpackConfig;
@@ -15,10 +15,10 @@ class SnowpackIO;
 class Snowpack;
 
 class SnowpackConfigManager {
-public:
-    static mio::Config loadConfiguration(const std::string& ini_file_path);
-    static void validateConfiguration(const mio::Config& cfg);
-    static std::string getDefaultConfigPath();
+ public:
+  static mio::Config loadConfiguration(const std::string& ini_file_path);
+  static void validateConfiguration(const mio::Config& cfg);
+  static std::string getDefaultConfigPath();
 };
 
-#endif // CONFIG_H
+#endif  // CONFIG_H

@@ -65,9 +65,10 @@ void prepare_meteo_data(const MeteoInput& input, CurrentMeteo& Mdata,
                                                       // emissivity heuristic
   Mdata.tss =
       mio::IOUtils::nodata;  // Let SNOWPACK solve for surface temperature
-  Mdata.ts0 = constants.surface_temp_guess;  // CRYOWRF
-                                             // src/coupler/main_coupler/Coupler.cpp:909
-                                             // (TSG=400K)
+  Mdata.ts0 =
+      constants.surface_temp_guess;  // CRYOWRF
+                                     // src/coupler/main_coupler/Coupler.cpp:909
+                                     // (TSG=400K)
   Mdata.hs = std::max(0.0, current_snow_depth);  // Current snow depth [m]
 
   // Set roughness length and friction velocity for wind pumping calculations
