@@ -43,9 +43,9 @@ def ensure_flags(name, extras):
 
     return pattern.sub(repl, text)
 
-extras_fortran = ['-g', '-O0', '-fno-omit-frame-pointer', '-fbacktrace', '-fcheck=bounds']
-extras_c = ['-g', '-O0', '-fno-omit-frame-pointer']
-extras_link = ['-g']
+extras_fortran = ['-g', '-O0', '-fno-omit-frame-pointer', '-fbacktrace', '-fcheck=bounds', '-fopenmp']
+extras_c = ['-g', '-O0', '-fno-omit-frame-pointer', '-fopenmp']
+extras_link = ['-g', '-lgomp']
 
 for name, extras in [
     ('DM_FFLAGS', extras_fortran),
