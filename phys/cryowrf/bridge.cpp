@@ -25,6 +25,11 @@
 #include <string>
 #include <vector>
 
+namespace {
+// Toggle verbose bridge tracing without touching call sites.
+constexpr bool kEnableTraceLogging = false;
+}
+
 // Forward declarations for namespace functions
 
 namespace SnowpackUtils {
@@ -726,7 +731,7 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
                                       SnowpackOutput& output,
                                       SnowpackLayerData* layer_data,
                                       BudgetData* budget_data) {
-  static std::atomic<int> debug_trace_counter(500);
+  static std::atomic<int> debug_trace_counter(kEnableTraceLogging ? 500 : 0);
   // Validate grid coordinates first
   if (input.i_grid < 0 || input.i_grid > 10000 || input.j_grid < 0 ||
       input.j_grid > 10000) {
@@ -742,7 +747,8 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
 
   // Track physics calls for debugging
   int call_count = ++execute_call_count_;
-  if (call_count <= 5 || (call_count % 1000 == 0)) {
+  if (kEnableTraceLogging &&
+      (call_count <= 5 || (call_count % 1000 == 0))) {
     if (call_count <= 5) {
       printf("SNOWPACK-INFO: Executed snowpack call #%d - Grid (%d,%d)\n",
              call_count, input.i_grid, input.j_grid);
@@ -770,13 +776,14 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
     // 1. Get/create persistent SNOWPACK objects (singleton pattern only)
     auto objects = SnowpackObjects::create_station_objects(input, *this);
 
-    if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+    if (kEnableTraceLogging &&
+        execute_call_count_.load(std::memory_order_relaxed) < 5) {
       printf("SNOWPACK-TRACE exec-start [%d,%d]\n", input.i_grid, input.j_grid);
       fflush(stdout);
     }
 
     int trace_remaining = debug_trace_counter.load(std::memory_order_relaxed);
-    if (trace_remaining > 0) {
+    if (kEnableTraceLogging && trace_remaining > 0) {
       if (debug_trace_counter.compare_exchange_strong(
               trace_remaining, trace_remaining - 1,
               std::memory_order_relaxed)) {
@@ -825,7 +832,8 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
 
     current_simulation_date_ = station_time_snapshot.current_time;
 
-    if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+    if (kEnableTraceLogging &&
+        execute_call_count_.load(std::memory_order_relaxed) < 5) {
       printf("SNOWPACK-TRACE exec-time [%d,%d]: julian=%.6f height=%.3f\n",
              input.i_grid, input.j_grid,
              station_time_snapshot.current_time.getJulian(), measured_height);
@@ -863,7 +871,8 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
                                       current_snow_depth, config_.get());
     int trace_after_prepare =
         debug_trace_counter.load(std::memory_order_relaxed);
-    if (trace_after_prepare > 0 && execute_call_count_.load() <= 20) {
+    if (kEnableTraceLogging && trace_after_prepare > 0 &&
+        execute_call_count_.load() <= 20) {
       printf(
           "SNOWPACK-TRACE prepare [%d,%d]: tid=%lu ta=%.2f wind=%.2f rh=%.3f "
           "dt=%.1f u*=%.3f z0=%.4f\n",
@@ -882,7 +891,8 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
     objects.instance->runSnowpackModel(*Mdata, *objects.station, cumu_precip,
                                        *sn_Bdata, *surfFluxes);
 
-    if (execute_call_count_.load(std::memory_order_relaxed) < 5) {
+    if (kEnableTraceLogging &&
+        execute_call_count_.load(std::memory_order_relaxed) < 5) {
       printf("SNOWPACK-TRACE exec-run [%d,%d]: completed Snowpack core\n",
              input.i_grid, input.j_grid);
       fflush(stdout);
@@ -916,7 +926,7 @@ void SnowpackBridge::execute_snowpack(const MeteoInput& input,
       budget_data->mass_swe = output.snow_swe;  // Ensure consistency
     }
 
-    if (execute_call_count_.load() <= 20) {
+    if (kEnableTraceLogging && execute_call_count_.load() <= 20) {
       printf(
           "SNOWPACK-TRACE output [%d,%d]: tid=%lu Tsurf=%.2f SWE=%.2f "
           "depth=%.2f HFX=%.2f QFX=%.6f\n",
