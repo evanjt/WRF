@@ -23,6 +23,48 @@ COPY --chown=wrfuser:wrfuser Registry/ ${BASE_DIR}/WRF/Registry/
 
 
 WORKDIR ${BASE_DIR}/WRF
+RUN printf '34\n1\n' | ./configure >/tmp/configure.log && \
+    python3 - <<'PY'
+import pathlib
+import re
+
+cfg = pathlib.Path('configure.wrf')
+text = cfg.read_text()
+
+def ensure_flags(name, extras):
+    pattern = re.compile(rf'^({name}\s*=\s*)(.*)$', re.MULTILINE)
+
+    def repl(match):
+        current = match.group(2).strip().split()
+        for token in extras:
+            if token not in current:
+                current.append(token)
+        return match.group(1) + ' '.join(current)
+
+    return pattern.sub(repl, text)
+
+extras_fortran = ['-g', '-O0', '-fno-omit-frame-pointer', '-fbacktrace', '-fcheck=bounds']
+extras_c = ['-g', '-O0', '-fno-omit-frame-pointer']
+extras_link = ['-g']
+
+for name, extras in [
+    ('DM_FFLAGS', extras_fortran),
+    ('DM_FFLAGS_NOOPT', extras_fortran),
+    ('FCFLAGS', extras_fortran),
+    ('FCOPTIM', ['-O0']),
+    ('DM_CFLAGS', extras_c),
+    ('DM_CCFLAGS', extras_c),
+    ('DM_CXXFLAGS', extras_c),
+    ('CFLAGS', extras_c),
+    ('CCFLAGS', extras_c),
+    ('CXXFLAGS', extras_c),
+    ('LDFLAGS', extras_link),
+    ('DM_LDFLAGS', extras_link),
+]:
+    text = ensure_flags(name, extras)
+
+cfg.write_text(text)
+PY
 RUN ./compile em_real -j 20 && \
     if [ -f "main/wrf.exe" ]; then \
         echo "WRF compilation successful: wrf.exe found at main/wrf.exe"; \

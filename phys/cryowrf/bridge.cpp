@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -490,6 +491,7 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(int i_grid, int j_grid,
                                                        double wrf_lat,
                                                        double wrf_lon,
                                                        double wrf_alt) {
+  static std::atomic<int> station_log_budget{10};
   const std::string station_key = SnowpackConstants::get().station_id_prefix +
                                   "_" + std::to_string(wrf_domain_id) + "_" +
                                   std::to_string(i_grid) + "_" +
@@ -526,10 +528,21 @@ SnowStation* SnowpackBridge::get_or_create_snowstation(int i_grid, int j_grid,
   try {
     position.setLatLon(wrf_lat, wrf_lon,
                        wrf_alt);  // Correct order: lat, lon, alt
-    printf(
-        "SNOWPACK-INFO: Successfully set geographic coordinates for station "
-        "(%d,%d)\n",
-        i_grid, j_grid);
+    if (station_log_budget.load(std::memory_order_relaxed) > 0) {
+      const int remaining = station_log_budget.fetch_sub(1, std::memory_order_relaxed);
+      if (remaining > 0) {
+        printf(
+            "SNOWPACK-INFO: Successfully set geographic coordinates for station "
+            "(%d,%d)\n",
+            i_grid, j_grid);
+        if (remaining == 1) {
+          printf(
+              "SNOWPACK-INFO: Further coordinate messages suppressed (quota reached).\n");
+        }
+      } else {
+        station_log_budget.store(0, std::memory_order_relaxed);
+      }
+    }
   } catch (const mio::InvalidArgumentException& e) {
     printf("SNOWPACK-ERROR: Invalid coordinates for station (%d,%d): %s\n",
            i_grid, j_grid, e.what());

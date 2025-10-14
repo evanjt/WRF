@@ -46,7 +46,9 @@ MODULE module_sf_snowpackdrv
     LOGICAL, SAVE :: coupling_enabled = .TRUE.
     LOGICAL, SAVE :: coupling_disabled_logged = .FALSE.
     LOGICAL, SAVE :: multi_layer_soil_enabled = .FALSE.
+    LOGICAL, SAVE :: first_cell_logged = .FALSE.
     CHARACTER(LEN=256), SAVE :: config_file_path = './io.ini'
+    INTEGER, SAVE :: next_summary_step = 1
 
     ! Per-grid accumulation for Meteo averaging / throttling
     LOGICAL, SAVE :: accum_initialized = .FALSE.
@@ -304,6 +306,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     TYPE(SnowpackInterface) :: interface_data
     CHARACTER(LEN=256) :: snpack_mode_lower
     CHARACTER(LEN=256) :: snpack_mode_trim
+    CHARACTER(LEN=256) :: log_line
+    CHARACTER(LEN=256) :: summary_msg
     
     ! Time initialization variables (CRYOWRF pattern)
     INTEGER(C_INT), SAVE :: simulation_start_year, simulation_start_month, simulation_start_day
@@ -317,6 +321,14 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     CHARACTER(LEN=256) :: snpack_mode
     INTEGER :: thread_id
     INTEGER :: num_threads
+    LOGICAL, EXTERNAL :: wrf_dm_on_monitor
+    LOGICAL :: is_monitor
+    INTEGER :: monitored_land_cells
+    INTEGER :: snowpack_columns
+    INTEGER :: waiting_cells
+    REAL :: snowpack_total_dt
+    REAL :: avg_effective_dt
+    LOGICAL :: emit_summary
     REAL :: ta_avg_val, qv_avg_val, u_avg_val, v_avg_val
     REAL :: sw_avg_val, lw_avg_val, p_avg_val, rain_total
     REAL :: dt_effective, met_height
@@ -427,15 +439,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         time_initialized = .TRUE.
     ENDIF
     
-    ! Diagnostic message showing namelist parameters
-    IF (itimestep == 1 .AND. .NOT. config_logged) THEN
-        CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
-        WRITE(*,'(A,L1)') 'SNOWPACK-INFO: sn_start_from_file = ', sn_start_from_file
-        WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_dt = ', snpack_dt
-        WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_write_dt = ', snpack_write_dt
-        WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode_trim)
-        config_logged = .TRUE.
-    END IF
+    ! Diagnostic message is emitted after thread/monitor context is available
 
     ! Safety check: Verify loop bounds are reasonable
     IF (its < 0 .OR. ite < 0 .OR. jts < 0 .OR. jte < 0) THEN
@@ -461,21 +465,42 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     num_threads = 1
 #endif
 
-    IF (itimestep == 1 .AND. thread_id == 0) THEN
-        WRITE(*,'(A,I4,A,4I10,A,I4)') 'SNOWPACK-TRACE tid=', thread_id, &
+    is_monitor = wrf_dm_on_monitor()
+
+    ! Diagnostic message showing namelist parameters (once per run)
+    IF (itimestep == 1 .AND. .NOT. config_logged) THEN
+        IF (thread_id == 0 .AND. is_monitor) THEN
+            CALL wrf_message('*** SNOWPACK LSM: Simplified interface active ***')
+            WRITE(log_line,'(A,L1)') 'SNOWPACK-INFO: sn_start_from_file = ', sn_start_from_file
+            CALL wrf_message(TRIM(log_line))
+            WRITE(log_line,'(A,F8.1)') 'SNOWPACK-INFO: snpack_dt = ', snpack_dt
+            CALL wrf_message(TRIM(log_line))
+            WRITE(log_line,'(A,F8.1)') 'SNOWPACK-INFO: snpack_write_dt = ', snpack_write_dt
+            CALL wrf_message(TRIM(log_line))
+            WRITE(log_line,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode_trim)
+            CALL wrf_message(TRIM(log_line))
+        END IF
+        config_logged = .TRUE.
+    END IF
+
+    IF (itimestep == 1 .AND. thread_id == 0 .AND. is_monitor) THEN
+        WRITE(log_line,'(A,I4,A,4I10,A,I4)') 'SNOWPACK-TRACE tid=', thread_id, &
      &        ' its,ite,jts,jte=', its, ite, jts, jte, ' nthreads=', num_threads
+        CALL wrf_message(TRIM(log_line))
     ENDIF
+
+    monitored_land_cells = 0
+    snowpack_columns = 0
+    waiting_cells = 0
+    snowpack_total_dt = 0.0
+    avg_effective_dt = 0.0
+    emit_summary = .FALSE.
 
     ! Grid loop with structured data approach
     DO J = jts,jte
     DO I = its,ite
         ! Skip water points
         IF((XLAND(I,J)-1.5) >= 0.) CYCLE
-
-        ! Debug: Print first few grid points to understand coordinate values
-        IF (I <= 2 .AND. J <= 2) THEN
-            WRITE(*,'(A,I10,I10)') 'SNOWPACK-DEBUG: Processing grid point I,J = ', I, J
-        ENDIF
 
         cell_active = .TRUE.
         IF (snpack_mode_trim == 'antarctica') THEN
@@ -497,6 +522,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             CYCLE
         END IF
 
+        monitored_land_cells = monitored_land_cells + 1
+
         ! Accumulate forcing samples before handing them to Snowpack.
         ! Mirrors the buffering logic in the legacy coupler (CRYOWRF/src/coupler/main_coupler/Coupler.cpp:820-906).
         acc_samples(I,J) = acc_samples(I,J) + 1
@@ -509,7 +536,10 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         acc_p(I,J)    = acc_p(I,J)    + P8W(I,1,J)
         acc_rain(I,J) = acc_rain(I,J) + RAINBL(I,J)
 
-        IF (acc_samples(I,J) < snowpack_compute_counter) CYCLE
+        IF (acc_samples(I,J) < snowpack_compute_counter) THEN
+            waiting_cells = waiting_cells + 1
+            CYCLE
+        END IF
 
         ! Compute averaged forcings for Snowpack call
         ta_avg_val = acc_ta(I,J)   / REAL(acc_samples(I,J))
@@ -557,30 +587,18 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
             ! Grid indices
             I, J, 1)
 
-        IF (itimestep == 1 .AND. I == its .AND. J == jts) THEN
-            WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F7.3,A,F7.3)') &
-     &             'SNOWPACK-PACK tid=', thread_id, ' ij=', I, J, &
-     &             ' lat=', interface_data%atmos%latitude, &
-     &             ' lon=', interface_data%atmos%longitude, &
-     &             ' T=', interface_data%atmos%temperature, &
-     &             ' RH=', interface_data%atmos%humidity
-            WRITE(*,'(A,F8.2,A,F8.2,A,F8.3)') 'SNOWPACK-PACK wind_u=', &
-     &             interface_data%atmos%wind_u, ' wind_v=', interface_data%atmos%wind_v, &
-     &             ' precip=', interface_data%atmos%precipitation
-        END IF
-
         ! Call SNOWPACK physics with structured interface (serialize core)
         !$OMP CRITICAL(snowpack_bridge)
         CALL snowpack_physics_structured(interface_data)
+        snowpack_columns = snowpack_columns + 1
+        snowpack_total_dt = snowpack_total_dt + dt_effective
 
-        IF (itimestep == 1 .AND. I == its .AND. J == jts) THEN
-            WRITE(*,'(A,I4,A,2I6,A,F8.2,A,F8.2,A,F8.2)') &
-     &           'SNOWPACK-RETURN tid=', thread_id, ' ij=', I, J, &
-     &           ' Tsurf=', interface_data%surface%surface_temp, &
-     &           ' SWE=', interface_data%surface%snow_swe, &
-     &           ' depth=', interface_data%surface%snow_depth
-            WRITE(*,'(A,F8.2,A,F8.2)') 'SNOWPACK-RETURN HFX=', &
-     &           interface_data%surface%heat_sensible, ' QFX=', interface_data%surface%heat_latent_kg
+        IF (.NOT. first_cell_logged .AND. thread_id == 0 .AND. is_monitor) THEN
+            WRITE(log_line,'(A,I0,A,I0,A,F8.2,A,F8.2,A,F6.1)') &
+     &           'SNOWPACK-FIRSTCALL ij=', I, ',', J, ' lat=', interface_data%atmos%latitude, &
+     &           ' lon=', interface_data%atmos%longitude, ' dt_eff(s)=', dt_effective
+            CALL wrf_message(TRIM(log_line))
+            first_cell_logged = .TRUE.
         END IF
 
         ! Unpack results back to WRF variables
@@ -764,6 +782,24 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         
     END DO
     END DO
+
+    IF (snowpack_columns > 0) THEN
+        avg_effective_dt = snowpack_total_dt / REAL(snowpack_columns)
+    ELSE
+        avg_effective_dt = 0.0
+    END IF
+
+    IF (thread_id == 0 .AND. is_monitor) THEN
+        emit_summary = (snowpack_columns > 0) .OR. (itimestep >= next_summary_step)
+        IF (emit_summary) THEN
+            WRITE(summary_msg,'(A,I0,A,I0,A,I0,A,I0,A,F8.1)') &
+     &          'SNOWPACK-STEP it=', itimestep, ' calls=', snowpack_columns, &
+     &          ' waiting=', waiting_cells, ' land=', monitored_land_cells, &
+     &          ' avg_dt(s)=', avg_effective_dt
+            CALL wrf_message(TRIM(summary_msg))
+            next_summary_step = itimestep + MAX(1, snowpack_compute_counter)
+        END IF
+    END IF
 
 END SUBROUTINE snowpacklsm
 
