@@ -113,6 +113,11 @@ TYPE, BIND(C) :: SnowpackLayerData_C
     REAL(C_DOUBLE) :: layer_bond_radius(100)
     REAL(C_DOUBLE) :: layer_dendricity(100)
     REAL(C_DOUBLE) :: layer_sphericity(100)
+    REAL(C_DOUBLE) :: layer_cdot(100)
+    REAL(C_DOUBLE) :: layer_meta(100)
+    REAL(C_DOUBLE) :: layer_deposition_julian(100)
+    REAL(C_DOUBLE) :: layer_graintype(100)
+    REAL(C_DOUBLE) :: layer_marker(100)
 END TYPE SnowpackLayerData_C
 
 TYPE, BIND(C) :: BudgetData_C
@@ -173,6 +178,11 @@ TYPE :: SnowLayerData
     REAL    :: bond_radius(MAX_SNOW_LAYERS)            ! Bond radius [mm]
     REAL    :: dendricity(MAX_SNOW_LAYERS)             ! Dendricity [-]
     REAL    :: sphericity(MAX_SNOW_LAYERS)             ! Sphericity [-]
+    REAL    :: cdot(MAX_SNOW_LAYERS)                   ! Stress rate [-]
+    REAL    :: meta(MAX_SNOW_LAYERS)                   ! Metamorphism tracker [-]
+    REAL    :: depd(MAX_SNOW_LAYERS)                   ! Deposition date (Julian)
+    REAL    :: graintype(MAX_SNOW_LAYERS)              ! Grain classification [-]
+    REAL    :: mk(MAX_SNOW_LAYERS)                     ! Grain marker [-]
 END TYPE SnowLayerData
 
 !-------------------------------------------------------------------
@@ -546,6 +556,11 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
     layers_c%layer_bond_radius = 0.0_C_DOUBLE
     layers_c%layer_dendricity = 0.0_C_DOUBLE
     layers_c%layer_sphericity = 0.0_C_DOUBLE
+    layers_c%layer_cdot = 0.0_C_DOUBLE
+    layers_c%layer_meta = 0.0_C_DOUBLE
+    layers_c%layer_deposition_julian = 0.0_C_DOUBLE
+    layers_c%layer_graintype = 0.0_C_DOUBLE
+    layers_c%layer_marker = 0.0_C_DOUBLE
 
     budgets_c%mass_precip = 0.0_C_DOUBLE
     budgets_c%mass_sublim = 0.0_C_DOUBLE
@@ -614,6 +629,11 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
         snowpack_data%layers%bond_radius(k) = REAL(layers_c%layer_bond_radius(k))
         snowpack_data%layers%dendricity(k) = REAL(layers_c%layer_dendricity(k))
         snowpack_data%layers%sphericity(k) = REAL(layers_c%layer_sphericity(k))
+        snowpack_data%layers%cdot(k) = REAL(layers_c%layer_cdot(k))
+        snowpack_data%layers%meta(k) = REAL(layers_c%layer_meta(k))
+        snowpack_data%layers%depd(k) = REAL(layers_c%layer_deposition_julian(k))
+        snowpack_data%layers%graintype(k) = REAL(layers_c%layer_graintype(k))
+        snowpack_data%layers%mk(k) = REAL(layers_c%layer_marker(k))
     END DO
 
     ! Clear remaining layers
@@ -627,6 +647,11 @@ SUBROUTINE snowpack_physics_structured(snowpack_data)
         snowpack_data%layers%bond_radius(k) = 0.0
         snowpack_data%layers%dendricity(k) = 0.0
         snowpack_data%layers%sphericity(k) = 0.0
+        snowpack_data%layers%cdot(k) = 0.0
+        snowpack_data%layers%meta(k) = 0.0
+        snowpack_data%layers%depd(k) = 0.0
+        snowpack_data%layers%graintype(k) = 0.0
+        snowpack_data%layers%mk(k) = 0.0
     END DO
 
     ! Store budget data

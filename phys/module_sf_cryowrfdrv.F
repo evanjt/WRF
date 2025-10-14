@@ -4,7 +4,7 @@
 ! WRF interface driver for SNOWPACK physics integration
 !
 MODULE module_sf_snowpackdrv
-    USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR, C_DOUBLE
+    USE ISO_C_BINDING, ONLY: C_CHAR, C_NULL_CHAR, C_DOUBLE, C_INT, C_FLOAT
 #ifdef _OPENMP
     USE omp_lib
 #endif
@@ -30,6 +30,14 @@ MODULE module_sf_snowpackdrv
             USE ISO_C_BINDING
             REAL(C_DOUBLE) :: snowpack_get_soil_emissivity
         END FUNCTION
+        SUBROUTINE snowpack_set_start_from_file_c(flag) BIND(C, name='snowpack_set_start_from_file')
+            USE ISO_C_BINDING
+            INTEGER(C_INT), VALUE :: flag
+        END SUBROUTINE snowpack_set_start_from_file_c
+        SUBROUTINE snowpack_save_state_c(i_grid, j_grid) BIND(C, name='snowpack_save_state')
+            USE ISO_C_BINDING
+            INTEGER(C_INT), VALUE :: i_grid, j_grid
+        END SUBROUTINE snowpack_save_state_c
     END INTERFACE
 
     ! Module-level configuration management
@@ -62,19 +70,34 @@ MODULE module_sf_snowpackdrv
         
         SUBROUTINE extract_snowpack_layers_c(i_grid, j_grid, &
             layer_temps, layer_thick, layer_voli, layer_volw, layer_volv, &
-            layer_rg, layer_rb, layer_dd, layer_sp, n_layers) &
+            layer_rg, layer_rb, layer_dd, layer_sp, layer_cdot, layer_meta, &
+            layer_depd, layer_graintype, layer_mk, n_layers) &
             BIND(C, name='extract_snowpack_layers_c')
             USE ISO_C_BINDING
             INTEGER(C_INT), INTENT(IN) :: i_grid, j_grid
             REAL(C_FLOAT), INTENT(OUT) :: layer_temps(100), layer_thick(100)
             REAL(C_FLOAT), INTENT(OUT) :: layer_voli(100), layer_volw(100), layer_volv(100)
             REAL(C_FLOAT), INTENT(OUT) :: layer_rg(100), layer_rb(100), layer_dd(100), layer_sp(100)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_cdot(100), layer_meta(100), layer_depd(100)
+            REAL(C_FLOAT), INTENT(OUT) :: layer_graintype(100), layer_mk(100)
             INTEGER(C_INT), INTENT(OUT) :: n_layers
         END SUBROUTINE extract_snowpack_layers_c
 
     END INTERFACE
 
 CONTAINS
+
+SUBROUTINE snowpack_tolower(str)
+    CHARACTER(LEN=*), INTENT(INOUT) :: str
+    INTEGER :: idx, ich
+
+    DO idx = 1, LEN(str)
+        ich = IACHAR(str(idx:idx))
+        IF (ich >= IACHAR('A') .AND. ich <= IACHAR('Z')) THEN
+            str(idx:idx) = CHAR(ich + 32)
+        END IF
+    END DO
+END SUBROUTINE snowpack_tolower
 
 !-------------------------------------------------------------------
 ! Initialize SNOWPACK configuration (called once)
@@ -147,7 +170,7 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
                SH2O,     TSLB,     SNOW,     SNOWH,   CANWAT,    ACSNOM, & ! IN/OUT LSM eqv
                ACSNOW,    EMISS,     QSFC,                                 & ! IN/OUT LSM eqv
                Z0,      ZNT,                                           & ! IN/OUT LSM eqv
-               SN_T,SN_THICK,SN_VOLI,SN_VOLW,SN_VOLV,SN_RG,SN_RB,SN_DD,SN_SP,SN_NLAYERS, & ! OPTIONAL CRYOWRF layer arrays
+               SN_T,SN_THICK,SN_VOLI,SN_VOLW,SN_VOLV,SN_RG,SN_RB,SN_DD,SN_SP,SN_NLAYERS,SN_CDOT,SN_META,SN_DEPD,SN_GRAINTYPE,SN_MK, & ! OPTIONAL CRYOWRF layer arrays
                M_BUDG_PRECIP,M_BUDG_SUBLIM,M_BUDG_MELT,M_BUDG_SWE,M_BUDG_REFREEZE, & ! OPTIONAL CRYOWRF mass budget
                E_BUDG_LW_IN,E_BUDG_LW_OUT,E_BUDG_SW_IN,E_BUDG_SW_OUT, & ! OPTIONAL CRYOWRF energy budget
                E_BUDG_SENSIBLE,E_BUDG_LATENT,E_BUDG_GFLUX,E_BUDG_RAINE,E_BUDG_DU,  &
@@ -223,6 +246,11 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_RB       ! bond radius [mm]
     REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_DD       ! dendricity [-]
     REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_SP       ! sphericity [-]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_CDOT     ! stress rate [-]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_META     ! metamorphism tracker [-]
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_DEPD     ! deposition date (Julian)
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_GRAINTYPE ! grain classification
+    REAL,    DIMENSION( ims:ime, 1:100, jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_MK       ! grain marker
     INTEGER, DIMENSION( ims:ime,        jms:jme ), INTENT(INOUT), OPTIONAL ::  SN_NLAYERS  ! number of layers
 
 ! CRYOWRF mass budget arrays (OPTIONAL - matching CRYOWRF behavior)
@@ -250,7 +278,32 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
 ! Local Variables
     INTEGER :: I, J, K
     INTEGER :: layer_count_local
+    INTEGER :: write_interval_steps
+    INTEGER :: layer_limit
+    INTEGER :: no_snpack_lay_to_sav
+    INTEGER :: n_layers_local
+    INTEGER :: copy_count
+    LOGICAL :: should_write_layers
+    LOGICAL :: cell_active
+    LOGICAL :: save_state_this_step
+    REAL, PARAMETER :: SN_LAYER_SENTINEL = -999.0
+    REAL(C_FLOAT) :: layer_temp_local(100)
+    REAL(C_FLOAT) :: layer_thick_local(100)
+    REAL(C_FLOAT) :: layer_voli_local(100)
+    REAL(C_FLOAT) :: layer_volw_local(100)
+    REAL(C_FLOAT) :: layer_volv_local(100)
+    REAL(C_FLOAT) :: layer_rg_local(100)
+    REAL(C_FLOAT) :: layer_rb_local(100)
+    REAL(C_FLOAT) :: layer_dd_local(100)
+    REAL(C_FLOAT) :: layer_sp_local(100)
+    REAL(C_FLOAT) :: layer_cdot_local(100)
+    REAL(C_FLOAT) :: layer_meta_local(100)
+    REAL(C_FLOAT) :: layer_depd_local(100)
+    REAL(C_FLOAT) :: layer_graintype_local(100)
+    REAL(C_FLOAT) :: layer_mk_local(100)
     TYPE(SnowpackInterface) :: interface_data
+    CHARACTER(LEN=256) :: snpack_mode_lower
+    CHARACTER(LEN=256) :: snpack_mode_trim
     
     ! Time initialization variables (CRYOWRF pattern)
     INTEGER(C_INT), SAVE :: simulation_start_year, simulation_start_month, simulation_start_day
@@ -295,6 +348,26 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
     CALL nl_get_snpack_dt(domain_id, snpack_dt)
     CALL nl_get_snpack_write_dt(domain_id, snpack_write_dt)
     CALL nl_get_snpack_mode(domain_id, snpack_mode)
+    CALL nl_get_no_snpack_lay_to_sav(domain_id, no_snpack_lay_to_sav)
+
+    snpack_mode_lower = snpack_mode
+    CALL snowpack_tolower(snpack_mode_lower)
+    IF (LEN_TRIM(snpack_mode_lower) == 0) THEN
+        snpack_mode_trim = 'land'
+    ELSE
+        snpack_mode_trim = snpack_mode_lower
+    END IF
+
+    layer_limit = MAX(1, MIN(100, no_snpack_lay_to_sav))
+    IF (snpack_write_dt > 0.0) THEN
+        write_interval_steps = MAX(1, NINT(snpack_write_dt / dt))
+    ELSE
+        write_interval_steps = 1
+    END IF
+    should_write_layers = (MOD(itimestep, write_interval_steps) == 0)
+    save_state_this_step = should_write_layers .AND. sn_start_from_file
+
+    CALL snowpack_set_start_from_file_c(MERGE(1_C_INT, 0_C_INT, sn_start_from_file))
 
     ! Initialize accumulation buffers (per grid point) on first entry
 #ifdef _OPENMP
@@ -360,23 +433,23 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         WRITE(*,'(A,L1)') 'SNOWPACK-INFO: sn_start_from_file = ', sn_start_from_file
         WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_dt = ', snpack_dt
         WRITE(*,'(A,F8.1)') 'SNOWPACK-INFO: snpack_write_dt = ', snpack_write_dt
-        WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode)
+        WRITE(*,'(A,A)') 'SNOWPACK-INFO: snpack_mode = ', TRIM(snpack_mode_trim)
         config_logged = .TRUE.
     END IF
 
     ! Safety check: Verify loop bounds are reasonable
     IF (its < 0 .OR. ite < 0 .OR. jts < 0 .OR. jte < 0) THEN
-        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Negative loop bounds detected! its,ite,jts,jte = ', its, ite, jts, jte
+        WRITE(*,'(A,4(I0,1X))') 'SNOWPACK-ERROR: Negative loop bounds detected! its,ite,jts,jte = ', its, ite, jts, jte
         RETURN
     ENDIF
 
     IF (its > ite .OR. jts > jte) THEN
-        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Invalid loop bounds (start > end)! its,ite,jts,jte = ', its, ite, jts, jte
+        WRITE(*,'(A,4(I0,1X))') 'SNOWPACK-ERROR: Invalid loop bounds (start > end)! its,ite,jts,jte = ', its, ite, jts, jte
         RETURN
     ENDIF
 
     IF (ite > 10000 .OR. jte > 10000) THEN
-        WRITE(*,'(A,I10,I10,I10,I10)') 'SNOWPACK-ERROR: Loop bounds too large! its,ite,jts,jte = ', its, ite, jts, jte
+        WRITE(*,'(A,4(I0,1X))') 'SNOWPACK-ERROR: Loop bounds too large! its,ite,jts,jte = ', its, ite, jts, jte
         RETURN
     ENDIF
 
@@ -403,6 +476,26 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         IF (I <= 2 .AND. J <= 2) THEN
             WRITE(*,'(A,I10,I10)') 'SNOWPACK-DEBUG: Processing grid point I,J = ', I, J
         ENDIF
+
+        cell_active = .TRUE.
+        IF (snpack_mode_trim == 'antarctica') THEN
+            IF (ISLTYP(I,J) /= 8) cell_active = .FALSE.
+        ELSEIF (snpack_mode_trim == 'land') THEN
+            IF (ISLTYP(I,J) == 14) cell_active = .FALSE.
+        END IF
+
+        IF (.NOT. cell_active) THEN
+            acc_samples(I,J) = 0
+            acc_ta(I,J) = 0.0
+            acc_qv(I,J) = 0.0
+            acc_u(I,J)  = 0.0
+            acc_v(I,J)  = 0.0
+            acc_sw(I,J) = 0.0
+            acc_lw(I,J) = 0.0
+            acc_p(I,J)  = 0.0
+            acc_rain(I,J) = 0.0
+            CYCLE
+        END IF
 
         ! Accumulate forcing samples before handing them to Snowpack.
         ! Mirrors the buffering logic in the legacy coupler (CRYOWRF/src/coupler/main_coupler/Coupler.cpp:820-906).
@@ -508,9 +601,84 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         
         ! Extract CRYOWRF layer arrays if present (matching CRYOWRF behavior)
         IF (PRESENT(SN_T)) THEN
-            CALL extract_snowpack_layers_c(I, J, &
-                SN_T(I,:,J), SN_THICK(I,:,J), SN_VOLI(I,:,J), SN_VOLW(I,:,J), SN_VOLV(I,:,J), &
-                SN_RG(I,:,J), SN_RB(I,:,J), SN_DD(I,:,J), SN_SP(I,:,J), SN_NLAYERS(I,J))
+            IF (should_write_layers) THEN
+                CALL extract_snowpack_layers_c(I, J, layer_temp_local, layer_thick_local, layer_voli_local, &
+                    layer_volw_local, layer_volv_local, layer_rg_local, layer_rb_local, layer_dd_local, &
+                    layer_sp_local, layer_cdot_local, layer_meta_local, layer_depd_local, &
+                    layer_graintype_local, layer_mk_local, n_layers_local)
+
+                IF (PRESENT(SN_NLAYERS)) SN_NLAYERS(I,J) = n_layers_local
+
+                copy_count = MIN(layer_limit, n_layers_local)
+
+                IF (copy_count > 0) THEN
+                    SN_T(I,1:copy_count,J)     = layer_temp_local(1:copy_count)
+                    IF (PRESENT(SN_THICK)) SN_THICK(I,1:copy_count,J) = layer_thick_local(1:copy_count)
+                    IF (PRESENT(SN_VOLI))  SN_VOLI(I,1:copy_count,J)  = layer_voli_local(1:copy_count)
+                    IF (PRESENT(SN_VOLW))  SN_VOLW(I,1:copy_count,J)  = layer_volw_local(1:copy_count)
+                    IF (PRESENT(SN_VOLV))  SN_VOLV(I,1:copy_count,J)  = layer_volv_local(1:copy_count)
+                    IF (PRESENT(SN_RG))    SN_RG(I,1:copy_count,J)    = layer_rg_local(1:copy_count)
+                    IF (PRESENT(SN_RB))    SN_RB(I,1:copy_count,J)    = layer_rb_local(1:copy_count)
+                    IF (PRESENT(SN_DD))    SN_DD(I,1:copy_count,J)    = layer_dd_local(1:copy_count)
+                    IF (PRESENT(SN_SP))    SN_SP(I,1:copy_count,J)    = layer_sp_local(1:copy_count)
+                    IF (PRESENT(SN_CDOT))  SN_CDOT(I,1:copy_count,J)  = layer_cdot_local(1:copy_count)
+                    IF (PRESENT(SN_META))  SN_META(I,1:copy_count,J)  = layer_meta_local(1:copy_count)
+                    IF (PRESENT(SN_DEPD))  SN_DEPD(I,1:copy_count,J)  = layer_depd_local(1:copy_count)
+                    IF (PRESENT(SN_GRAINTYPE)) SN_GRAINTYPE(I,1:copy_count,J) = layer_graintype_local(1:copy_count)
+                    IF (PRESENT(SN_MK))    SN_MK(I,1:copy_count,J)    = layer_mk_local(1:copy_count)
+                ELSE
+                    SN_T(I,1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_THICK)) SN_THICK(I,1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLI))  SN_VOLI(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLW))  SN_VOLW(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLV))  SN_VOLV(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RG))    SN_RG(I,1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RB))    SN_RB(I,1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DD))    SN_DD(I,1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_SP))    SN_SP(I,1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_CDOT))  SN_CDOT(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_META))  SN_META(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DEPD))  SN_DEPD(I,1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_GRAINTYPE)) SN_GRAINTYPE(I,1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_MK))    SN_MK(I,1:layer_limit,J)    = SN_LAYER_SENTINEL
+                END IF
+
+                IF (copy_count < layer_limit) THEN
+                    SN_T(I,copy_count+1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_THICK)) SN_THICK(I,copy_count+1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLI))  SN_VOLI(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLW))  SN_VOLW(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLV))  SN_VOLV(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RG))    SN_RG(I,copy_count+1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RB))    SN_RB(I,copy_count+1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DD))    SN_DD(I,copy_count+1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_SP))    SN_SP(I,copy_count+1:layer_limit,J)    = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_CDOT))  SN_CDOT(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_META))  SN_META(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DEPD))  SN_DEPD(I,copy_count+1:layer_limit,J)  = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_GRAINTYPE)) SN_GRAINTYPE(I,copy_count+1:layer_limit,J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_MK))    SN_MK(I,copy_count+1:layer_limit,J)    = SN_LAYER_SENTINEL
+                END IF
+
+                IF (layer_limit < SIZE(SN_T,2)) THEN
+                    SN_T(I,layer_limit+1:SIZE(SN_T,2),J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_THICK)) SN_THICK(I,layer_limit+1:SIZE(SN_THICK,2),J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLI))  SN_VOLI(I,layer_limit+1:SIZE(SN_VOLI,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLW))  SN_VOLW(I,layer_limit+1:SIZE(SN_VOLW,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_VOLV))  SN_VOLV(I,layer_limit+1:SIZE(SN_VOLV,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RG))    SN_RG(I,layer_limit+1:SIZE(SN_RG,2),J)       = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_RB))    SN_RB(I,layer_limit+1:SIZE(SN_RB,2),J)       = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DD))    SN_DD(I,layer_limit+1:SIZE(SN_DD,2),J)       = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_SP))    SN_SP(I,layer_limit+1:SIZE(SN_SP,2),J)       = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_CDOT))  SN_CDOT(I,layer_limit+1:SIZE(SN_CDOT,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_META))  SN_META(I,layer_limit+1:SIZE(SN_META,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_DEPD))  SN_DEPD(I,layer_limit+1:SIZE(SN_DEPD,2),J)   = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_GRAINTYPE)) SN_GRAINTYPE(I,layer_limit+1:SIZE(SN_GRAINTYPE,2),J) = SN_LAYER_SENTINEL
+                    IF (PRESENT(SN_MK))    SN_MK(I,layer_limit+1:SIZE(SN_MK,2),J)       = SN_LAYER_SENTINEL
+                END IF
+            END IF
+        ELSEIF (PRESENT(SN_NLAYERS)) THEN
+            IF (should_write_layers) SN_NLAYERS(I,J) = interface_data%layers%n_layers
         END IF
         
         ! Extract CRYOWRF budget arrays if present (matching CRYOWRF behavior)
@@ -531,6 +699,8 @@ SUBROUTINE snowpacklsm(ITIMESTEP,XLAT,XLONG,DZ8W,DT,DX, & ! IN : Time/Space-rela
         IF (PRESENT(E_BUDG_DU))        E_BUDG_DU(I,J)       = E_BUDG_DU(I,J)       + interface_data%budgets%energy_total
 
         !$OMP END CRITICAL(snowpack_bridge)
+
+        IF (save_state_this_step) CALL snowpack_save_state_c(I, J)
 
         ! Additional CRYOWRF budget components (extracted but not passed to WRF standard interface)
         ! These are available for diagnostics and future CRYOWRF compatibility:

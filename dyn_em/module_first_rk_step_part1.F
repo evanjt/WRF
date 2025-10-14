@@ -913,6 +913,9 @@ BENCH_START(surf_driver_tim)
      &        ,q2_ndg_new=grid%q2_ndg_new                  &
      &        ,sn_ndg_old=grid%sn_ndg_old                  &
      &        ,sn_ndg_new=grid%sn_ndg_new                  &
+     &        ,sn_t=grid%sn_t, sn_thick=grid%sn_thick, sn_volI=grid%sn_volI, sn_volW=grid%sn_volW, sn_volV=grid%sn_volV &
+     &        ,sn_rg=grid%sn_rg, sn_rb=grid%sn_rb, sn_dd=grid%sn_dd, sn_sp=grid%sn_sp, sn_nlayers=grid%sn_nlayers &
+     &        ,sn_cdot=grid%sn_cdot, sn_meta=grid%sn_meta, sn_depd=grid%sn_depd, sn_graintype=grid%sn_graintype, sn_mk=grid%sn_mk &
      &        ,pxlsm_modis_veg=config_flags%pxlsm_modis_veg                   &
      &        ,LAI_PX=grid%lai_px                                             &
      &        ,WWLT_PX=grid%wwlt_px, WFC_PX=grid%wfc_px                       &

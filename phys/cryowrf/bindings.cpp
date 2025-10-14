@@ -37,6 +37,16 @@ void snowpack_physics_c(
     bridge.execute_snowpack(*input, *output, layer_data, budget_data);
 }
 
+void snowpack_set_start_from_file(int flag) {
+    SnowpackBridge& bridge = SnowpackBridge::instance();
+    bridge.set_start_from_file(flag != 0);
+}
+
+void snowpack_save_state(int i_grid, int j_grid) {
+    SnowpackBridge& bridge = SnowpackBridge::instance();
+    bridge.save_snowstation_state(i_grid, j_grid);
+}
+
 
 // // Save all snowpack states (called from Fortran for periodic saves)
 // void save_all_snowpack_states_c() {
@@ -53,7 +63,10 @@ void initialize_snowpack_config_c(const char* ini_file_path) {
 // Extract snowpack layers from structured data (non-redundant implementation)
 void extract_snowpack_layers_c(int i_grid, int j_grid,
                               float* layer_temps, float* layer_thick, float* layer_voli, float* layer_volw, float* layer_volv,
-                              float* layer_rg, float* layer_rb, float* layer_dd, float* layer_sp, int* n_layers) {
+                              float* layer_rg, float* layer_rb, float* layer_dd, float* layer_sp,
+                              float* layer_cdot, float* layer_meta, float* layer_depd,
+                              float* layer_graintype, float* layer_mk,
+                              int* n_layers) {
     // Get existing snow station data
     SnowpackBridge& bridge = SnowpackBridge::instance();
     SnowStation* station = bridge.get_existing_snowstation(i_grid, j_grid);
@@ -79,15 +92,25 @@ void extract_snowpack_layers_c(int i_grid, int j_grid,
         layer_rb[i] = static_cast<float>(layer_data.layer_bond_radius[i]);
         layer_dd[i] = static_cast<float>(layer_data.layer_dendricity[i]);
         layer_sp[i] = static_cast<float>(layer_data.layer_sphericity[i]);
+        layer_cdot[i] = static_cast<float>(layer_data.layer_cdot[i]);
+        layer_meta[i] = static_cast<float>(layer_data.layer_meta[i]);
+        layer_depd[i] = static_cast<float>(layer_data.layer_deposition_julian[i]);
+        layer_graintype[i] = static_cast<float>(layer_data.layer_graintype[i]);
+        layer_mk[i] = static_cast<float>(layer_data.layer_marker[i]);
     }
 }
 
 // Fortran-mangled versions (with trailing underscores) for compatibility
 void extract_snowpack_layers_c_(int i_grid, int j_grid,
                                float* layer_temps, float* layer_thick, float* layer_voli, float* layer_volw, float* layer_volv,
-                               float* layer_rg, float* layer_rb, float* layer_dd, float* layer_sp, int* n_layers) {
+                               float* layer_rg, float* layer_rb, float* layer_dd, float* layer_sp,
+                               float* layer_cdot, float* layer_meta, float* layer_depd,
+                               float* layer_graintype, float* layer_mk,
+                               int* n_layers) {
     extract_snowpack_layers_c(i_grid, j_grid, layer_temps, layer_thick, layer_voli, layer_volw, layer_volv,
-                              layer_rg, layer_rb, layer_dd, layer_sp, n_layers);
+                              layer_rg, layer_rb, layer_dd, layer_sp,
+                              layer_cdot, layer_meta, layer_depd, layer_graintype, layer_mk,
+                              n_layers);
 }
 
 } // extern "C"

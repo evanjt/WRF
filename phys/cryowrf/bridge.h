@@ -41,6 +41,7 @@ private:
     std::atomic<bool> config_initialized_{false};
     std::string config_file_path_;
     mutable std::mutex config_mutex_;
+    bool start_from_file_enabled_ = true;
 
     // Time management
     mio::Date current_simulation_date_;
@@ -82,6 +83,8 @@ public:
     SnowpackConfig* get_config() const { return config_.get(); }
     SnowpackIO* get_io() const { return io_.get(); }
     std::mutex& io_mutex() const { return io_mutex_; }
+    void set_start_from_file(bool enabled) { start_from_file_enabled_ = enabled; }
+    bool start_from_file_enabled() const { return start_from_file_enabled_; }
 
     // Time management
     void initialize_time(int start_year, int start_month, int start_day,

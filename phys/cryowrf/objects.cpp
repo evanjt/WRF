@@ -162,11 +162,14 @@ void ensure_station_initialized(SnowStation* station,
         std::string stationName = "WRF Grid Point " + std::to_string(input.i_grid) + "," + std::to_string(input.j_grid);
 
         // Try to load existing state first
-        bool loaded_from_file = load_station_state(
-            generate_grid_key(input.i_grid, input.j_grid),
-            station, position, stationID, stationName,
-            bridge.get_io(), bridge.io_mutex(), 1, input.i_grid, input.j_grid
-        );
+        bool loaded_from_file = false;
+        if (bridge.start_from_file_enabled()) {
+            loaded_from_file = load_station_state(
+                generate_grid_key(input.i_grid, input.j_grid),
+                station, position, stationID, stationName,
+                bridge.get_io(), bridge.io_mutex(), 1, input.i_grid, input.j_grid
+            );
+        }
 
         if (!loaded_from_file) {
             // Initialize fresh station

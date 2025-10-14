@@ -328,7 +328,8 @@ CONTAINS
      &          ,irr_end_julianday,irr_freq,irr_ph,irr_rand_field     &
      ! CRYOWRF layer arrays (OPTIONAL - for SNOWPACK physics)
      &          ,sn_t,sn_thick,sn_voli,sn_volw,sn_volv               & !CRYOWRF
-     &          ,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers                  & !CRYOWRF
+     &          ,sn_rg,sn_rb,sn_dd,sn_sp,sn_nlayers,sn_cdot,sn_meta,  & !CRYOWRF
+     &           sn_depd,sn_graintype,sn_mk                          & !CRYOWRF
      ! CRYOWRF budget arrays (OPTIONAL - for SNOWPACK physics)
      &          ,m_budg_precip,m_budg_sublim,m_budg_melt             & !CRYOWRF
      &          ,m_budg_swe,m_budg_refreeze                         & !CRYOWRF
@@ -824,15 +825,20 @@ CONTAINS
    REAL, DIMENSION( ims:ime, jms:jme ) , OPTIONAL, INTENT(INOUT)::   HO4     ! ssib-snow
 
 ! CRYOWRF layer arrays (OPTIONAL - for SNOWPACK physics)
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_T        ! layer temperature [K]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_THICK    ! layer thickness [m]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLI     ! ice volume fraction [%]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLW     ! water volume fraction [%]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLV     ! air volume fraction [%]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RG       ! grain radius [mm]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RB       ! bond radius [mm]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_DD       ! dendricity [-]
-   REAL, DIMENSION( ims:ime, 1:50, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_SP       ! sphericity [-]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_T        ! layer temperature [K]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_THICK    ! layer thickness [m]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLI     ! ice volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLW     ! water volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_VOLV     ! air volume fraction [%]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RG       ! grain radius [mm]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_RB       ! bond radius [mm]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_DD       ! dendricity [-]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_SP       ! sphericity [-]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_CDOT     ! stress rate [-]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_META     ! metamorphism tracker [-]
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_DEPD     ! deposition date (Julian)
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_GRAINTYPE ! grain classification
+   REAL, DIMENSION( ims:ime, 1:100, jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_MK       ! grain marker
    INTEGER, DIMENSION( ims:ime,     jms:jme ), OPTIONAL, INTENT(INOUT)::   SN_NLAYERS  ! number of layers
 
 ! CRYOWRF mass budget arrays (OPTIONAL - for SNOWPACK physics)
@@ -4413,6 +4419,7 @@ CONTAINS
             acsnow, emiss, qsfc,                                &
             z0, znt,                                            &
             sn_t, sn_thick, sn_voli, sn_volw, sn_volv, sn_rg, sn_rb, sn_dd, sn_sp, sn_nlayers, &
+            sn_cdot, sn_meta, sn_depd, sn_graintype, sn_mk, &
             m_budg_precip, m_budg_sublim, m_budg_melt, m_budg_swe, m_budg_refreeze, &
             e_budg_lw_in, e_budg_lw_out, e_budg_sw_in, e_budg_sw_out, &
             e_budg_sensible, e_budg_latent, e_budg_gflux, e_budg_raine, e_budg_du, &

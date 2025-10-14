@@ -65,6 +65,11 @@ struct SnowpackLayerData {
     double layer_bond_radius[100];
     double layer_dendricity[100];
     double layer_sphericity[100];
+    double layer_cdot[100];
+    double layer_meta[100];
+    double layer_deposition_julian[100];
+    double layer_graintype[100];
+    double layer_marker[100];
 };
 
 struct BudgetData {
